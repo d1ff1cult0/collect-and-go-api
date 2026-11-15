@@ -1,32 +1,151 @@
-# Collect&Go-prijzen in Google Sheets
+# Prijsspoor voor Google Sheets
 
-`collectandgo.gs` voegt twee formules toe aan een spreadsheet die de Prijsspoor-API gebruiken:
+Controleert de Collect&Go-prijzen in een spreadsheet met de Prijsspoor-API
+(`https://c-en-g.vtk.be`). De add-on leest de Collect&Go-link in een cel, ook als die achter
+tekst zit (Invoegen > Link), en vergelijkt de prijs.
+
+## Gebruik
+
+**Prijzen kleuren.** Kies *Extensies > Prijsspoor > Prijzen controleren (groen/rood)*. Op het
+actieve blad krijgt elke prijs naast een Collect&Go-link een kleur:
+
+| Kleur | Betekenis |
+|---|---|
+| groen | de prijs klopt (ook als het de prijs met hoeveelheidskorting is) |
+| rood | Collect&Go vraagt nu iets anders; de echte prijs staat in de notitie op de cel |
+| oranje | het product is niet gevonden op Collect&Go |
+
+De prijscel is de cel op dezelfde rij, in de kolom van de dichtstbijzijnde kop
+**"Prijs per eenheid"** of **"Prijs per stuk"** erboven, zoals in het budgetsjabloon. Met
+*Kleuren wissen* komen de oorspronkelijke achtergronden terug en verdwijnen de notities.
+
+**Formules.** Voor wie liever met formules werkt:
 
 | Formule | Geeft |
 |---|---|
-| `=CGCHECK(I45; O45)` | `✓` als I45 de huidige C&G-prijs is, `✓ (vanaf 3 st.)` als het de hoeveelheidskorting is, anders `✗ C&G: € 16,45` |
-| `=CGPRIJS(O45)` | de huidige prijs (een getal, dus bruikbaar in berekeningen) |
-| `=CGPRIJS(O45; "eenheidsprijs")` | ook: `eenheid`, `korting`, `korting_vanaf`, `naam`, `beschikbaar`, `laatst_gecontroleerd`, `laatst_gewijzigd`, `vorige_prijs` |
+| `=CGCHECK(I45; O45)` | `✓`, `✓ (vanaf 3 st.)` of `✗ C&G: € 16,45` |
+| `=CGPRIJS(O45)` | de huidige prijs als getal |
+| `=CGPRIJS(O45; "laatst_gewijzigd")` | ook: `eenheidsprijs`, `eenheid`, `korting`, `korting_vanaf`, `naam`, `beschikbaar`, `laatst_gecontroleerd`, `vorige_prijs` |
 
-`O45` mag een link zijn, tekst met een link erachter (Invoegen > Link), of tekst waarin een
-collectandgo.be-link staat. Cellen zonder Collect&Go-link geven een lege cel (`CGCHECK`) of
-`geen Collect&Go-link` (`CGPRIJS`).
+Google rekent eigen formules alleen opnieuw als hun invoer verandert. Voor verse prijzen kies je
+*Extensies > Prijsspoor > Formules vernieuwen*. Antwoorden worden een uur bewaard; Prijsspoor
+zelf wordt om de zes uur bijgewerkt.
 
-## Installeren
+## Installeren in één spreadsheet
 
-1. Open de spreadsheet en kies **Extensies > Apps Script**.
-2. Vervang de inhoud van `Code.gs` door die van `collectandgo.gs` en klik op **Opslaan**.
-3. Herlaad de spreadsheet. Er verschijnt een menu **Collect&Go**.
-4. Zet in een vrije kolom naast de eerste productregel `=CGCHECK(I45; O45)` en sleep die naar
-   beneden.
+1. Open de spreadsheet en kies *Extensies > Apps Script*.
+2. Vervang de inhoud van `Code.gs` door `collectandgo.gs` en klik op *Opslaan*.
+3. Herlaad de spreadsheet. Het menu staat onder *Extensies > (naam van het project)*.
 
-De eerste keer dat je het menu gebruikt, vraagt Google om toestemming voor het script.
+Verwijder dit script weer zodra de add-on voor de organisatie geïnstalleerd is. Anders bestaan
+`CGCHECK` en `CGPRIJS` twee keer.
 
-## Goed om te weten
+## Installeren voor de hele organisatie (Workspace-beheerder)
 
-- Google herberekent een eigen formule alleen als haar invoer verandert. Nieuwe prijzen haal je
-  op via **Collect&Go > Prijzen vernieuwen**. Antwoorden worden een uur bewaard; Prijsspoor zelf
-  wordt om de 6 uur bijgewerkt.
-- Een link naar een product dat Prijsspoor nog niet kent, wordt de eerste keer opgezocht. Dat
-  duurt hooguit enkele seconden.
-- Staat jullie Prijsspoor elders, pas dan `PRIJSSPOOR_API` bovenaan het script aan.
+Je publiceert het script als **privé Editor-add-on**, alleen zichtbaar binnen het domein, en
+installeert het als beheerder voor iedereen. Google beoordeelt een privé-app niet.
+
+Je hebt nodig:
+- een Workspace-beheerdersaccount van het domein;
+- een Google Cloud-project binnen de organisatie van het domein;
+- minstens één screenshot van 1280×800 (bv. een budget na *Prijzen controleren*). Maak die door
+  het script eerst in één spreadsheet te installeren (zie hierboven).
+
+### 1. Het Apps Script-project
+
+1. Ga naar <https://script.google.com> > *Nieuw project* en noem het **Prijsspoor**.
+2. *Projectinstellingen* (tandwiel): vink *"appsscript.json"-manifestbestand weergeven in editor*
+   aan en noteer het **Script-ID**.
+3. Zet de code erin, op een van twee manieren:
+   - **Met clasp** (aangeraden voor updates). Eerst eenmalig: zet de *Google Apps Script API* aan
+     op <https://script.google.com/home/usersettings>. Daarna:
+     ```bash
+     npm install -g @google/clasp
+     clasp login                       # met je VTK-account
+     cd integrations/google-sheets
+     cp .clasp.json.example .clasp.json # vul het Script-ID in
+     clasp push --force                # zet collectandgo.gs en appsscript.json online
+     ```
+   - **Met de hand.** Plak `collectandgo.gs` in `Code.gs` en `appsscript.json` in
+     `appsscript.json`, en sla op.
+
+### 2. Het Google Cloud-project
+
+1. Ga naar <https://console.cloud.google.com> > *Nieuw project*, bv. `prijsspoor-sheets`, met als
+   *Organisatie* jullie domein.
+2. *Google Auth Platform* (vroeger "OAuth-toestemmingsscherm"):
+   - *Branding*: appnaam **Prijsspoor**, supportmail, het logo `assets/icon-128.png`, en als links
+     `https://c-en-g.vtk.be/` (startpagina) en `https://c-en-g.vtk.be/privacy` (privacybeleid).
+   - *Doelgroep*: **Intern**.
+   - *Gegevenstoegang*: voeg de drie scopes uit `appsscript.json` toe.
+3. Noteer het **projectnummer** (*Cloud-overzicht > Dashboard*).
+4. Terug in Apps Script: *Projectinstellingen > Google Cloud Platform-project > Project wijzigen*
+   en vul het projectnummer in.
+
+### 3. Een versie publiceren
+
+In Apps Script: *Implementeren > Nieuwe implementatie > type kiezen (tandwiel) > Add-on*, met als
+beschrijving bv. "v1", en dan *Implementeren*. Noteer de **implementatie-ID**. Met clasp kan het
+ook zo: `clasp version "v1"` en daarna `clasp deploy -V 1 -d "v1"`.
+
+### 4. De Marketplace-vermelding
+
+In het Cloud-project: *API's en services > Bibliotheek* > **Google Workspace Marketplace SDK** >
+*Inschakelen*, en daarna *Beheren*.
+
+*App-configuratie*:
+- **Zichtbaarheid van de app**: *Privé* (alleen het domein). Dit kun je later niet meer wijzigen.
+- **Installatie-instellingen**: *Alleen beheerdersinstallatie* (of ook individuele installatie
+  als collega's hem zelf mogen toevoegen).
+- **App-integratie**: *Google Workspace-add-on* is het niet; kies **Editor-add-on** >
+  **Sheets-add-on-extensie**, en vul het Script-ID en de implementatie-ID of het versienummer in,
+  zoals het formulier vraagt.
+- **OAuth-scopes**: dezelfde drie als in `appsscript.json`.
+- **Ontwikkelaarsgegevens**: naam, `https://c-en-g.vtk.be/` en een mailadres.
+- *Opslaan*.
+
+*Winkelvermelding*:
+- naam **Prijsspoor**, korte beschrijving ("Controleer Collect&Go-prijzen in je budget") en een
+  langere (de tabel onder *Gebruik* hierboven);
+- categorie: *Bedrijfstools* of *Productiviteit*;
+- afbeeldingen: `assets/icon-128.png`, `assets/icon-32.png`, `assets/banner-220x140.png` en je
+  screenshot;
+- links: gebruiksvoorwaarden en privacybeleid `https://c-en-g.vtk.be/privacy`, support
+  `https://c-en-g.vtk.be/`;
+- *Publiceren*. Een privé-app staat meteen in de Marketplace van het domein.
+
+### 5. Installeren voor iedereen
+
+Open <https://admin.google.com> > *Apps > Google Workspace Marketplace-apps > Apps-lijst* >
+*App toevoegen* > *Interne app toevoegen* > **Prijsspoor** > *Beheerdersinstallatie*. Kies
+*Iedereen in de organisatie* (of een organisatie-eenheid of groep) en accepteer de rechten.
+
+De add-on kan ook vanuit Sheets: *Extensies > Add-ons > Add-ons downloaden* > tab *Intern* >
+Prijsspoor > *Beheerdersinstallatie*.
+
+Het kan tot 24 uur duren voor iedereen hem ziet.
+
+### 6. Voor collega's
+
+In elke spreadsheet: *Extensies > Prijsspoor > Prijzen controleren (groen/rood)*. Wie formules
+wil gebruiken, kiest eerst één keer *Extensies > Prijsspoor > Hoe gebruik ik dit?*: Google maakt
+`CGCHECK` en `CGPRIJS` in een spreadsheet pas beschikbaar nadat de add-on daar één keer gebruikt
+is.
+
+### Updates
+
+1. Pas `collectandgo.gs` aan en doe `clasp push --force`.
+2. *Implementeren > Implementaties beheren* > potlood > *Versie: Nieuwe versie* > *Implementeren*.
+   Hangt de Marketplace-configuratie aan een versienummer in plaats van een implementatie-ID,
+   zet dan ook daar het nieuwe nummer.
+
+Gebruikers krijgen de nieuwe versie vanzelf.
+
+## Bestanden
+
+| Bestand | Wat |
+|---|---|
+| `collectandgo.gs` | de code (zowel add-on als script in één spreadsheet) |
+| `appsscript.json` | manifest: scopes, en `UrlFetch` alleen naar `https://c-en-g.vtk.be/` |
+| `.clasp.json.example`, `.claspignore` | voor `clasp push` |
+| `assets/` | icoontjes en kaartbanner voor de Marketplace |

@@ -36,6 +36,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/product/{id}", get(pages::product))
         .route("/wijzigingen", get(pages::changes))
         .route("/api", get(pages::api_docs))
+        .route("/privacy", get(pages::privacy))
         .route("/static/style.css", get(style_css))
         .route("/static/favicon.svg", get(favicon))
         .route("/static/chart.js", get(chart_js))

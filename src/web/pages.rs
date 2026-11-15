@@ -740,6 +740,20 @@ pub async fn api_docs(state: State) -> PageResult {
 }
 
 #[derive(Template)]
+#[template(path = "privacy.html")]
+struct PrivacyPage {
+    chrome: Chrome,
+    base: String,
+}
+
+pub async fn privacy(state: State) -> PageResult {
+    Ok(render(&PrivacyPage {
+        chrome: Chrome::new(&state, "Privacy en voorwaarden", "").await,
+        base: state.config.public_base_url.clone(),
+    }))
+}
+
+#[derive(Template)]
 #[template(path = "error.html")]
 struct ErrorPage {
     chrome: Chrome,

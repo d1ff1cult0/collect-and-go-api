@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap prose">
+  <h1>Privacy en voorwaarden</h1>
+  <p>Prijsspoor is een intern hulpmiddel van VTK. Het volgt de prijzen op Collect&amp;Go en toont hun geschiedenis. Deze pagina geldt voor de website, de API en de Google Sheets-add-on.</p>
+
+  <h2 id="gegevens">Welke gegevens</h2>
+  <p>Prijsspoor bewaart enkel publieke productgegevens van Collect&amp;Go: namen, prijzen en links. Er zijn geen accounts en er worden geen persoonsgegevens opgeslagen.</p>
+  <p>De webserver houdt technische logs bij, met het IP-adres en het opgevraagde adres van elke aanvraag. Die dienen enkel om storingen op te sporen, worden niet gedeeld en verdwijnen bij de volgende herstart of logrotatie.</p>
+
+  <h2 id="add-on">De Google Sheets-add-on</h2>
+  <p>De add-on stuurt enkel de Collect&amp;Go-links uit je spreadsheet naar deze API om de prijzen op te vragen. Andere inhoud van je spreadsheet verlaat Google niet. De add-on leest en wijzigt enkel de spreadsheet waarin je hem gebruikt: hij kleurt prijscellen en zet een notitie met de huidige prijs, en dat ook alleen als je daar zelf om vraagt.</p>
+  <p>De add-on vraagt deze rechten:</p>
+  <ul>
+    <li>de huidige spreadsheet bekijken en bewerken (<code>spreadsheets.currentonly</code>);</li>
+    <li>verbinding maken met deze dienst (<code>script.external_request</code>, enkel naar <code>{{ base }}</code>);</li>
+    <li>een menu tonen in Sheets (<code>script.container.ui</code>).</li>
+  </ul>
+
+  <h2 id="voorwaarden">Voorwaarden</h2>
+  <p>Prijsspoor wordt aangeboden zoals het is, zonder garantie. De prijzen worden om de zes uur opgehaald en kunnen achterlopen op Collect&amp;Go. Kijk voor de juiste prijs altijd op Collect&amp;Go zelf. Prijsspoor hoort niet bij Colruyt Group.</p>
+
+  <h2 id="contact">Contact</h2>
+  <p>Vragen of problemen: neem contact op met IT van VTK. De broncode staat op <a href="https://github.com/d1ff1cult0/collect-and-go-api">GitHub</a>.</p>
+</div>
+{% endblock %}
