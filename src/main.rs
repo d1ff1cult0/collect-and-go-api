@@ -44,6 +44,8 @@ async fn main() -> Result<()> {
     let config = config::Config::from_env()?;
     let db = db::connect(&config.database_url).await?;
     let cogo = cogo::CogoClient::new(&config)?;
+    let t = cogo.transport_status();
+    tracing::info!(mode = t.mode, proxy = t.proxy, "verbinding met Collect&Go");
     let state = Arc::new(AppState {
         config,
         db,

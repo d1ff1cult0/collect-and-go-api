@@ -225,6 +225,7 @@ pub struct StatusJson {
     stats: db::Stats,
     scrape_running: bool,
     scrape_interval_hours: f64,
+    transport: crate::cogo::TransportStatus,
     last_successful_run: Option<db::ScrapeRun>,
     recent_runs: Vec<db::ScrapeRun>,
 }
@@ -235,6 +236,7 @@ pub async fn status(state: State) -> ApiResult<StatusJson> {
         stats: db::stats(&state.db).await?,
         scrape_running: state.scrape_lock.is_running(),
         scrape_interval_hours: state.config.scrape_interval.as_secs_f64() / 3600.0,
+        transport: state.cogo.transport_status(),
         last_successful_run: db::last_successful_run(&state.db).await?,
         recent_runs: db::recent_runs(&state.db, 10).await?,
     }))

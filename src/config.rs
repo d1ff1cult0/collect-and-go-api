@@ -7,6 +7,14 @@ use anyhow::{Context, Result};
 pub const DEFAULT_API_KEY: &str = "502b657c-624c-11eb-8024-f4d06b721e80";
 
 #[derive(Clone, Debug)]
+pub struct RelayConfig {
+    pub url: String,
+    pub secret: String,
+    /// `true`: alles via de relay; `false`: enkel wanneer Collect&Go de rechtstreekse weg tegenhoudt.
+    pub always: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct Config {
     pub bind_addr: SocketAddr,
     pub database_url: String,
@@ -23,6 +31,10 @@ pub struct Config {
     pub request_delay: Duration,
     pub api_key: String,
     pub user_agent: String,
+    /// HTTP(S)/SOCKS5-proxy voor alle rechtstreekse aanvragen naar Collect&Go (`COGO_PROXY`).
+    pub proxy: Option<String>,
+    /// De relay (`relay/server.cjs`), voor wanneer Collect&Go het IP van de server weigert.
+    pub relay: Option<RelayConfig>,
     /// Token voor `POST /api/v1/admin/scrape`. Zonder token is het endpoint uitgeschakeld.
     pub admin_token: Option<String>,
     /// Publieke basis-URL van deze dienst, enkel gebruikt in de API-documentatie.
@@ -62,6 +74,35 @@ impl Config {
             .parse()
             .context("SCRAPE_REQUEST_DELAY_MS moet een getal zijn")?;
 
+        let relay = match std::env::var("COGO_RELAY_URL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+        {
+            None => None,
+            Some(url) => {
+                let secret = std::env::var("COGO_RELAY_SECRET").unwrap_or_default();
+                anyhow::ensure!(
+                    secret.len() >= 16,
+                    "COGO_RELAY_SECRET ontbreekt of is korter dan 16 tekens (zelfde waarde als RELAY_SECRET van de relay)"
+                );
+                let always = match env_or("COGO_RELAY_MODE", "fallback")
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    "always" | "altijd" => true,
+                    "fallback" => false,
+                    other => anyhow::bail!(
+                        "COGO_RELAY_MODE moet `fallback` of `always` zijn, niet `{other}`"
+                    ),
+                };
+                Some(RelayConfig {
+                    url: url.trim().to_string(),
+                    secret,
+                    always,
+                })
+            }
+        };
+
         Ok(Self {
             bind_addr,
             database_url: env_or("DATABASE_URL", "sqlite://data/cogo.db"),
@@ -78,6 +119,10 @@ impl Config {
                 "COGO_USER_AGENT",
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             ),
+            proxy: std::env::var("COGO_PROXY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            relay,
             admin_token: std::env::var("ADMIN_TOKEN")
                 .ok()
                 .filter(|t| !t.trim().is_empty()),

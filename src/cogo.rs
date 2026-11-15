@@ -6,12 +6,12 @@
 
 use std::{
     sync::LazyLock,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 use regex::Regex;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::{config::Config, util};
@@ -349,13 +349,36 @@ static API_KEY_RE: LazyLock<Regex> =
 // ---------------------------------------------------------------------------------------------
 
 pub struct CogoClient {
+    /// Rechtstreeks naar Collect&Go (eventueel via `COGO_PROXY`).
     http: reqwest::Client,
+    relay: Option<Relay>,
     api_key: RwLock<String>,
     request_delay: Duration,
+    /// Tot wanneer we niet rechtstreeks proberen omdat Collect&Go dit IP tegenhield.
+    direct_blocked_until: std::sync::Mutex<Option<Instant>>,
+    has_proxy: bool,
     /// Serialiseert requests naar de website zelf (productpagina's), zodat de publieke API
     /// nooit een stortvloed aan requests naar Collect&Go kan veroorzaken.
     site_lock: Mutex<()>,
 }
+
+/// De relay (zie `relay/server.cjs`): een dienst op een ander, liefst residentieel, IP die
+/// Collect&Go namens ons opvraagt.
+struct Relay {
+    url: String,
+    secret: String,
+    always: bool,
+    http: reqwest::Client,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    Direct,
+    Relay,
+}
+
+/// Hoe lang we na een blokkade niet rechtstreeks proberen (enkel met een relay).
+const DIRECT_BLOCK_PAUSE: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, thiserror::Error)]
 pub enum FetchError {
@@ -363,6 +386,20 @@ pub enum FetchError {
     NotFound,
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TransportStatus {
+    /// "direct", "fallback" (rechtstreeks, relay bij blokkade) of "relay" (altijd relay)
+    pub mode: &'static str,
+    pub proxy: bool,
+    /// Collect&Go hield de rechtstreekse weg recent tegen; we gaan nu via de relay.
+    pub direct_blocked: bool,
+}
+
+struct Reply {
+    status: u16,
+    body: bytes::Bytes,
 }
 
 fn jitter(max_ms: u64) -> Duration {
@@ -373,19 +410,54 @@ fn jitter(max_ms: u64) -> Duration {
     Duration::from_millis(u64::from(nanos) % max_ms.max(1))
 }
 
+static TITLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<title[^>]*>([^<]*)</title>").unwrap());
+
+/// Herkent een antwoord van de botbeveiliging: HTTP 456/429, of een "AntiBot"-pagina.
+fn is_blocked(r: &Reply) -> bool {
+    if matches!(r.status, 429 | 456) {
+        return true;
+    }
+    let head = &r.body[..r.body.len().min(64 * 1024)];
+    let head = String::from_utf8_lossy(head);
+    TITLE_RE
+        .captures(&head)
+        .is_some_and(|c| c[1].to_ascii_lowercase().contains("antibot"))
+}
+
 impl CogoClient {
     pub fn new(cfg: &Config) -> Result<Self> {
-        let http = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .user_agent(cfg.user_agent.clone())
             .timeout(Duration::from_secs(90))
             .connect_timeout(Duration::from_secs(20))
             .gzip(true)
-            .brotli(true)
-            .build()?;
+            .brotli(true);
+        if let Some(proxy) = &cfg.proxy {
+            builder = builder
+                .proxy(reqwest::Proxy::all(proxy).context("COGO_PROXY is geen geldige proxy-URL")?);
+        }
+        let relay = match &cfg.relay {
+            Some(r) => Some(Relay {
+                url: r.url.trim_end_matches('/').to_string(),
+                secret: r.secret.clone(),
+                always: r.always,
+                // De browserweg van de relay kan een wachtpagina uitzitten: ruime timeout.
+                http: reqwest::Client::builder()
+                    .gzip(true)
+                    .timeout(Duration::from_secs(180))
+                    .connect_timeout(Duration::from_secs(20))
+                    .build()?,
+            }),
+            None => None,
+        };
         Ok(Self {
-            http,
+            http: builder.build()?,
+            relay,
             api_key: RwLock::new(cfg.api_key.clone()),
             request_delay: cfg.request_delay,
+            direct_blocked_until: std::sync::Mutex::new(None),
+            has_proxy: cfg.proxy.is_some(),
             site_lock: Mutex::new(()),
         })
     }
@@ -394,61 +466,160 @@ impl CogoClient {
         self.request_delay
     }
 
-    /// GET met retries + exponentiële backoff. Geeft de body terug.
+    pub fn transport_status(&self) -> TransportStatus {
+        TransportStatus {
+            mode: match &self.relay {
+                None => "direct",
+                Some(r) if r.always => "relay",
+                Some(_) => "fallback",
+            },
+            proxy: self.has_proxy,
+            direct_blocked: self.direct_blocked(),
+        }
+    }
+
+    fn direct_blocked(&self) -> bool {
+        self.direct_blocked_until
+            .lock()
+            .map(|g| g.is_some_and(|t| Instant::now() < t))
+            .unwrap_or(false)
+    }
+
+    fn route(&self) -> Route {
+        match &self.relay {
+            Some(r) if r.always || self.direct_blocked() => Route::Relay,
+            _ => Route::Direct,
+        }
+    }
+
+    /// Eén poging, langs de gekozen weg.
+    async fn send(
+        &self,
+        url: &str,
+        use_api_key: bool,
+        accept: &str,
+        route: Route,
+    ) -> Result<Reply> {
+        let api_key = if use_api_key {
+            Some(self.api_key.read().await.clone())
+        } else {
+            None
+        };
+        match (route, &self.relay) {
+            (Route::Relay, Some(relay)) => {
+                let resp = relay
+                    .http
+                    .post(format!("{}/fetch", relay.url))
+                    .header("x-relay-secret", &relay.secret)
+                    .json(&serde_json::json!({ "url": url, "accept": accept, "apiKey": api_key }))
+                    .send()
+                    .await
+                    .context("relay niet bereikbaar")?;
+                let status = resp.status();
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    bail!("relay weigert het geheim (controleer COGO_RELAY_SECRET)");
+                }
+                if !status.is_success() {
+                    bail!("relay antwoordde HTTP {}", status.as_u16());
+                }
+                let upstream = resp
+                    .headers()
+                    .get("x-relay-status")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse().ok())
+                    .context("relay gaf geen x-relay-status")?;
+                Ok(Reply {
+                    status: upstream,
+                    body: resp.bytes().await?,
+                })
+            }
+            _ => {
+                let mut req = self
+                    .http
+                    .get(url)
+                    .header("Accept", accept)
+                    .header("Accept-Language", "nl-BE,nl;q=0.9")
+                    .header("Referer", format!("{SITE}/"));
+                if let Some(key) = api_key {
+                    req = req.header("X-CG-APIKey", key).header("Origin", SITE);
+                }
+                let resp = req
+                    .send()
+                    .await
+                    .with_context(|| format!("request naar {url} mislukt"))?;
+                let status = resp.status().as_u16();
+                Ok(Reply {
+                    status,
+                    body: resp.bytes().await.context("body lezen mislukt")?,
+                })
+            }
+        }
+    }
+
+    /// GET met retries + exponentiële backoff. Houdt Collect&Go de rechtstreekse weg tegen en
+    /// is er een relay, dan gaat het meteen (en de volgende 30 minuten) via de relay.
     async fn get_with_retry(
         &self,
         url: &str,
         use_api_key: bool,
         accept: &str,
-    ) -> Result<String, FetchError> {
+    ) -> Result<bytes::Bytes, FetchError> {
         let mut last_err = anyhow!("geen poging gedaan");
         let mut refreshed_key = false;
-        for attempt in 1..=MAX_ATTEMPTS {
-            let mut req = self
-                .http
-                .get(url)
-                .header("Accept", accept)
-                .header("Accept-Language", "nl-BE,nl;q=0.9")
-                .header("Referer", format!("{SITE}/"));
-            if use_api_key {
-                req = req
-                    .header("X-CG-APIKey", self.api_key.read().await.clone())
-                    .header("Origin", SITE);
-            }
-            match req.send().await {
-                Ok(resp) => {
-                    let status = resp.status();
-                    if status.is_success() {
-                        match resp.text().await {
-                            Ok(body) => return Ok(body),
-                            Err(e) => last_err = anyhow!(e).context("body lezen mislukt"),
+        let mut attempt = 0;
+        while attempt < MAX_ATTEMPTS {
+            attempt += 1;
+            let route = self.route();
+            match self.send(url, use_api_key, accept, route).await {
+                Ok(reply) if is_blocked(&reply) => {
+                    if route == Route::Direct && self.relay.is_some() {
+                        tracing::warn!(
+                            status = reply.status,
+                            "Collect&Go houdt dit IP tegen, verder via de relay"
+                        );
+                        if let Ok(mut g) = self.direct_blocked_until.lock() {
+                            *g = Some(Instant::now() + DIRECT_BLOCK_PAUSE);
                         }
-                    } else if status == reqwest::StatusCode::NOT_FOUND {
-                        return Err(FetchError::NotFound);
-                    } else if use_api_key && !refreshed_key && matches!(status.as_u16(), 401 | 403)
-                    {
-                        refreshed_key = true;
-                        tracing::warn!(%status, "API-key geweigerd, nieuwe key ophalen van de website");
-                        if let Err(e) = self.refresh_api_key().await {
-                            tracing::warn!(error = %e, "API-key vernieuwen mislukt");
-                        }
-                        last_err = anyhow!("HTTP {status}");
+                        // Meteen opnieuw langs de relay, zonder wachten en zonder poging te tellen.
+                        attempt -= 1;
                         continue;
-                    } else {
-                        last_err = anyhow!("HTTP {status} voor {url}");
-                        if status.is_client_error()
-                            && !matches!(status.as_u16(), 408 | 425 | 429 | 456)
-                        {
-                            return Err(FetchError::Other(last_err));
+                    }
+                    last_err = anyhow!(
+                        "Collect&Go houdt de aanvraag tegen (HTTP {}{}) voor {url}",
+                        reply.status,
+                        if route == Route::Relay {
+                            ", via de relay"
+                        } else {
+                            "; stel een relay in, zie README"
                         }
+                    );
+                }
+                Ok(reply) if (200..300).contains(&reply.status) => return Ok(reply.body),
+                Ok(reply) if reply.status == 404 => return Err(FetchError::NotFound),
+                Ok(reply) if use_api_key && !refreshed_key && matches!(reply.status, 401 | 403) => {
+                    refreshed_key = true;
+                    tracing::warn!(
+                        status = reply.status,
+                        "API-key geweigerd, nieuwe key ophalen van de website"
+                    );
+                    if let Err(e) = self.refresh_api_key().await {
+                        tracing::warn!(error = %format!("{e:#}"), "API-key vernieuwen mislukt");
+                    }
+                    last_err = anyhow!("HTTP {}", reply.status);
+                    continue;
+                }
+                Ok(reply) => {
+                    last_err = anyhow!("HTTP {} voor {url}", reply.status);
+                    if (400..500).contains(&reply.status) && !matches!(reply.status, 408 | 425) {
+                        return Err(FetchError::Other(last_err));
                     }
                 }
-                Err(e) => last_err = anyhow!(e).context(format!("request naar {url} mislukt")),
+                Err(e) => last_err = e,
             }
             if attempt < MAX_ATTEMPTS {
-                // 2s, 4s, 8s, 16s, 32s (+ jitter); 456 = anti-bot, dus ruim wachten.
+                // 2s, 4s, 8s, 16s, 32s (+ jitter); bij de botbeveiliging dus ruim wachten.
                 let backoff = Duration::from_secs(2u64.pow(attempt)) + jitter(1500);
-                tracing::warn!(attempt, error = %last_err, ?backoff, "request mislukt, opnieuw proberen");
+                tracing::warn!(attempt, error = %format!("{last_err:#}"), ?backoff, "request mislukt, opnieuw proberen");
                 tokio::time::sleep(backoff).await;
             }
         }
@@ -456,14 +627,11 @@ impl CogoClient {
     }
 
     async fn refresh_api_key(&self) -> Result<()> {
-        let html = self
-            .http
-            .get(format!("{SITE}/nl/home"))
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
+        let reply = self
+            .send(&format!("{SITE}/nl/home"), false, "text/html", self.route())
             .await?;
+        anyhow::ensure!(reply.status == 200, "homepage gaf HTTP {}", reply.status);
+        let html = String::from_utf8_lossy(&reply.body);
         let key = API_KEY_RE
             .captures(&html)
             .map(|c| c[1].to_string())
@@ -483,7 +651,7 @@ impl CogoClient {
             .get_with_retry(&url, true, "application/json")
             .await
             .map_err(|e| anyhow!(e))?;
-        serde_json::from_str(&body).context("zoekresultaat kon niet geparsed worden")
+        serde_json::from_slice(&body).context("zoekresultaat kon niet geparsed worden")
     }
 
     /// Eén product via zijn uniqueID.
@@ -498,7 +666,7 @@ impl CogoClient {
         match self.get_with_retry(&url, true, "application/json").await {
             Ok(body) => {
                 let resp: SearchResponse =
-                    serde_json::from_str(&body).context("byId kon niet geparsed worden")?;
+                    serde_json::from_slice(&body).context("byId kon niet geparsed worden")?;
                 Ok(resp.entries.into_iter().next())
             }
             Err(FetchError::NotFound) => Ok(None),
@@ -507,11 +675,11 @@ impl CogoClient {
     }
 
     pub async fn sitemap_product_urls(&self) -> Result<Vec<String>> {
-        let xml = self
+        let body = self
             .get_with_retry(&format!("{SITE}/sitemap.xml"), false, "application/xml")
             .await
             .map_err(|e| anyhow!(e))?;
-        let all = parse_sitemap_index(&xml);
+        let all = parse_sitemap_index(&String::from_utf8_lossy(&body));
         let nl: Vec<String> = all
             .iter()
             .filter(|u| u.contains("nl_BE-product"))
@@ -524,14 +692,10 @@ impl CogoClient {
     }
 
     pub async fn sitemap(&self, url: &str) -> Result<Vec<SitemapEntry>> {
-        let resp = self
-            .http
-            .get(url)
-            .header("Referer", format!("{SITE}/"))
-            .send()
-            .await?
-            .error_for_status()?;
-        let bytes = resp.bytes().await?;
+        let bytes = self
+            .get_with_retry(url, false, "application/xml")
+            .await
+            .map_err(|e| anyhow!(e))?;
         let xml = if bytes.starts_with(&[0x1f, 0x8b]) {
             use std::io::Read;
             let mut s = String::new();
@@ -548,7 +712,7 @@ impl CogoClient {
         let _guard = self.site_lock.lock().await;
         let url = format!("{SITE}{path}");
         let html = self.get_with_retry(&url, false, "text/html").await?;
-        let page = parse_product_page(&html);
+        let page = parse_product_page(&String::from_utf8_lossy(&html));
         // Kleine pauze zodat opeenvolgende opzoekingen de site niet bestoken.
         tokio::time::sleep(Duration::from_millis(500)).await;
         Ok(page)
@@ -627,5 +791,114 @@ mod tests {
         let p = parse_product_page(html).unwrap();
         assert_eq!(p.product_id, "3074457345616678942");
         assert_eq!(p.urls.len(), 2);
+    }
+
+    fn reply(status: u16, body: &str) -> Reply {
+        Reply {
+            status,
+            body: bytes::Bytes::from(body.to_string()),
+        }
+    }
+
+    #[test]
+    fn blocked_detection() {
+        assert!(is_blocked(&reply(456, "")));
+        assert!(is_blocked(&reply(429, "")));
+        assert!(is_blocked(&reply(
+            200,
+            "<html><head><title>Colruyt | AntiBot</title>"
+        )));
+        assert!(!is_blocked(&reply(
+            200,
+            "<html><head><title>BONI walnootpitten</title>"
+        )));
+        assert!(!is_blocked(&reply(404, "")));
+    }
+
+    /// Mock: `/direct` geeft 456 (zoals Collect&Go vanaf een server-IP), de relay geeft 200.
+    async fn mock_servers() -> (String, String) {
+        use axum::{
+            Router,
+            http::HeaderMap,
+            routing::{get, post},
+        };
+        let direct = Router::new().route(
+            "/direct",
+            get(|| async { (axum::http::StatusCode::from_u16(456).unwrap(), "blocked") }),
+        );
+        let relay = Router::new().route(
+            "/fetch",
+            post(|headers: HeaderMap, body: String| async move {
+                if headers.get("x-relay-secret").and_then(|v| v.to_str().ok())
+                    != Some("0123456789abcdef")
+                {
+                    return (
+                        axum::http::StatusCode::UNAUTHORIZED,
+                        HeaderMap::new(),
+                        String::new(),
+                    );
+                }
+                let mut h = HeaderMap::new();
+                h.insert("x-relay-status", "200".parse().unwrap());
+                (axum::http::StatusCode::OK, h, format!("via relay: {body}"))
+            }),
+        );
+        let mut urls = Vec::new();
+        for app in [direct, relay] {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            urls.push(format!("http://{}", l.local_addr().unwrap()));
+            tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+        }
+        (urls.remove(0), urls.remove(0))
+    }
+
+    fn test_config(relay_url: &str, secret: &str) -> Config {
+        let mut cfg = Config::from_env().unwrap();
+        cfg.proxy = None;
+        cfg.relay = Some(crate::config::RelayConfig {
+            url: relay_url.into(),
+            secret: secret.into(),
+            always: false,
+        });
+        cfg
+    }
+
+    #[tokio::test]
+    async fn falls_back_to_relay_when_blocked() {
+        let (direct, relay) = mock_servers().await;
+        let client = CogoClient::new(&test_config(&relay, "0123456789abcdef")).unwrap();
+        assert_eq!(client.transport_status().mode, "fallback");
+        let started = Instant::now();
+        let body = client
+            .get_with_retry(&format!("{direct}/direct"), true, "application/json")
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.starts_with("via relay:"), "{body}");
+        assert!(
+            body.contains("/direct") && body.contains("apiKey"),
+            "{body}"
+        );
+        // Geen backoff: de overstap gebeurt meteen.
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(client.transport_status().direct_blocked);
+        assert_eq!(client.route(), Route::Relay);
+    }
+
+    #[tokio::test]
+    async fn wrong_relay_secret_is_an_error() {
+        let (_, relay) = mock_servers().await;
+        let client = CogoClient::new(&test_config(&relay, "verkeerd-geheim-xx")).unwrap();
+        let err = client
+            .send(
+                "https://www.collectandgo.be/",
+                false,
+                "text/html",
+                Route::Relay,
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(format!("{err:#}").contains("geheim"), "{err:#}");
     }
 }
