@@ -362,7 +362,7 @@ const PER_PAGE: i64 = 30;
 pub async fn search(state: State, Query(p): Query<SearchParams>) -> PageResult {
     let q = p.q.unwrap_or_default().trim().to_string();
     // Een geplakte Collect&Go-link of een artikelnummer gaat rechtstreeks naar het product.
-    if util::parse_product_url(&q).is_ok() {
+    if util::parse_cogo_link(&q).is_ok() {
         let enc = percent_encoding::utf8_percent_encode(&q, percent_encoding::NON_ALPHANUMERIC);
         return Ok(Redirect::to(&format!("/opzoeken?url={enc}")).into_response());
     }

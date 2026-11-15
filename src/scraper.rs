@@ -285,10 +285,59 @@ pub enum ResolveError {
 
 const NEGATIVE_CACHE: chrono::Duration = chrono::Duration::hours(1);
 
-/// Zoekt het product-ID voor een Collect&Go-URL. Eerst in de database (sitemap-koppelingen),
-/// anders wordt de productpagina één keer opgehaald en het resultaat bewaard.
+/// Zoekt het product-ID voor een Collect&Go-link: een productpagina of een zoeklink met
+/// `#pdp_<id>`.
 pub async fn resolve_url(state: &AppState, raw: &str) -> Result<String, ResolveError> {
-    let path = util::parse_product_url(raw)?;
+    match util::parse_cogo_link(raw)? {
+        util::CogoLink::Page(path) => resolve_page(state, &path).await,
+        util::CogoLink::Sku(sku) => resolve_sku(state, &sku).await,
+    }
+}
+
+/// Een product-ID voor een SKU-ID uit `#pdp_<id>`.
+///
+/// Collect&Go (HCL Commerce) maakt elk product samen met zijn ene SKU aan, met opeenvolgende
+/// ID's: het product heeft het ID van de SKU min één. Is dat product gekend, dan volstaat de
+/// database. Anders vragen we het product op en aanvaarden het enkel als de SKU erbij hoort.
+async fn resolve_sku(state: &AppState, sku: &str) -> Result<String, ResolveError> {
+    if db::product_exists(&state.db, sku).await? {
+        return Ok(sku.to_string());
+    }
+    let parent = sku
+        .parse::<u64>()
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .ok_or(ResolveError::NotFound)?
+        .to_string();
+    if db::product_exists(&state.db, &parent).await? {
+        return Ok(parent);
+    }
+
+    let key = format!("#pdp_{sku}");
+    if db::recently_unresolved(&state.db, &key, Utc::now() - NEGATIVE_CACHE)
+        .await?
+        .is_some()
+    {
+        return Err(ResolveError::NotFound);
+    }
+    let entry = state
+        .cogo
+        .product_by_id(&parent)
+        .await
+        .map_err(|e| ResolveError::Upstream(format!("{e:#}")))?;
+    let Some(entry) =
+        entry.filter(|e| e.unique_id == parent && e.skus.iter().any(|s| s.unique_id == sku))
+    else {
+        db::mark_unresolved(&state.db, &key, "SKU niet gevonden").await?;
+        return Err(ResolveError::NotFound);
+    };
+    db::record_products(&state.db, &[entry.normalize()], Utc::now()).await?;
+    Ok(parent)
+}
+
+/// Product-ID voor een productpagina. Eerst in de database (sitemap-koppelingen), anders wordt
+/// de productpagina één keer opgehaald en het resultaat bewaard.
+async fn resolve_page(state: &AppState, path: &util::ProductPath) -> Result<String, ResolveError> {
     if let Some(id) = db::product_for_path(&state.db, &path.key).await? {
         return Ok(id);
     }

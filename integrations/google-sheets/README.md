@@ -2,7 +2,9 @@
 
 Controleert de Collect&Go-prijzen in een spreadsheet met de Prijsspoor-API
 (`https://c-en-g.vtk.be`). De add-on leest de Collect&Go-link in een cel, ook als die achter
-tekst zit (Invoegen > Link), en vergelijkt de prijs.
+tekst zit (Invoegen > Link), en vergelijkt de prijs. Dat kan een productpagina zijn
+(`.../nl/assortiment/<product>`) of een zoek- of categoriepagina waarop je een product hebt
+opengeklikt (`.../nl/zoek?searchTerm=...#pdp_<nummer>`).
 
 ## Gebruik
 
@@ -97,9 +99,9 @@ In het Cloud-project: *API's en services > Bibliotheek* > **Google Workspace Mar
 - **Zichtbaarheid van de app**: *Privé* (alleen het domein). Dit kun je later niet meer wijzigen.
 - **Installatie-instellingen**: *Alleen beheerdersinstallatie* (of ook individuele installatie
   als collega's hem zelf mogen toevoegen).
-- **App-integratie**: *Google Workspace-add-on* is het niet; kies **Editor-add-on** >
-  **Sheets-add-on-extensie**, en vul het Script-ID en de implementatie-ID of het versienummer in,
-  zoals het formulier vraagt.
+- **App-integratie**: niet *Google Workspace add-on*, maar alleen **Sheets add-on** aanvinken
+  (dat is het editor-add-on-type). Vul het **Script-ID** in en bij *Script version* het
+  **versienummer** uit stap 3 (bv. `1`), niet de implementatie-ID.
 - **OAuth-scopes**: dezelfde drie als in `appsscript.json`.
 - **Ontwikkelaarsgegevens**: naam, `https://c-en-g.vtk.be/` en een mailadres.
 - *Opslaan*.

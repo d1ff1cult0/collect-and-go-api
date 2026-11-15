@@ -6,7 +6,7 @@
 
   <h2 id="price">Prijs opvragen met een Collect&amp;Go-link</h2>
   <pre><code>GET {{ base }}/api/v1/price?url=&lt;link naar een productpagina&gt;</code></pre>
-  <p>Geef de volledige link van een productpagina op collectandgo.be mee (Nederlands of Frans, met of zonder <code>https://</code>). Codeer de link als querystring-parameter.</p>
+  <p>Geef de volledige link van een productpagina op collectandgo.be mee (Nederlands of Frans, met of zonder <code>https://</code>). Een link naar een zoek- of categoriepagina waarop je een product hebt opengeklikt werkt ook: die eindigt op <code>#pdp_&lt;nummer&gt;</code>. Codeer de link als querystring-parameter.</p>
   <pre><code>curl -G '{{ base }}/api/v1/price' --data-urlencode 'url={{ example_url }}'</code></pre>
   <p>Antwoord (ingekort):</p>
 <pre><code>{
@@ -42,7 +42,7 @@
     <dt><code>previous_price</code></dt><dd>De prijs vóór de laatste wijziging, of <code>null</code>.</dd>
     <dt><code>offer</code></dt><dd>Hoeveelheidskorting: de stukprijs als je minstens <code>min_quantity</code> stuks koopt.</dd>
   </dl>
-  <p>Foutcodes: <code>400</code> als de link geen Collect&amp;Go-productpagina is, <code>404</code> als er op die link geen product staat, <code>502</code> als Collect&amp;Go niet antwoordt. De body is dan <code>{"error": "…", "status": 404}</code>.</p>
+  <p>Foutcodes: <code>400</code> als de link niet naar één Collect&amp;Go-product wijst, <code>404</code> als er op die link geen product staat, <code>502</code> als Collect&amp;Go niet antwoordt. De body is dan <code>{"error": "…", "status": 404}</code>.</p>
 
   <h2 id="products">Producten zoeken</h2>
   <pre><code>GET {{ base }}/api/v1/products?q=koffie&amp;page=1&amp;per_page=24&amp;sort=prijs&amp;available=true</code></pre>
