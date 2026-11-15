@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+  <section class="notice notice-error">
+    <h1>{% if status == 404 %}Niet gevonden{% else if status == 400 %}Ongeldige link{% else if status == 502 %}Collect&amp;Go niet bereikbaar{% else %}Er ging iets mis{% endif %}</h1>
+    <p>{{ message }}</p>
+    <p><a href="/">Naar de startpagina</a></p>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<section class="hero">
+  <div class="wrap">
+    <h1 class="hero-title">Wat kostte het vorige maand?</h1>
+    <p class="hero-lede">Prijsspoor bewaart de prijs van elk product op Collect&amp;Go, elke zes uur opnieuw. Zoek een product of plak de link van een productpagina om te zien hoe de prijs veranderde.</p>
+    <form class="search search-hero" action="/zoek" method="get" role="search">
+      <label class="visually-hidden" for="q">Zoek een product of plak een Collect&amp;Go-link</label>
+      <input id="q" name="q" type="search" placeholder="Bijvoorbeeld: koffie, Boni walnoten of een collectandgo.be-link" autocomplete="off" autofocus>
+      <button type="submit">Zoeken</button>
+    </form>
+    {% if has_data %}
+    <dl class="facts">
+      <div><dt>Producten gevolgd</dt><dd>{{ products }}</dd></div>
+      <div><dt>Nu bestelbaar</dt><dd>{{ available }}</dd></div>
+      <div><dt>Prijzen bewaard</dt><dd>{{ price_points }}</dd></div>
+      {% if let Some(t) = chrome.last_update %}<div><dt>Laatst bijgewerkt</dt><dd>{{ t }}</dd></div>{% endif %}
+    </dl>
+    {% endif %}
+  </div>
+</section>
+
+<div class="wrap">
+{% if !has_data %}
+  <section class="notice">
+    <h2>De eerste prijzen worden opgehaald</h2>
+    <p>{% if scrape_running %}Prijsspoor haalt nu voor het eerst alle producten op. Dat duurt enkele minuten. Vernieuw deze pagina straks.{% else %}Er staan nog geen prijzen in de database. De eerstvolgende ophaalronde vult ze aan.{% endif %}</p>
+  </section>
+{% else %}
+  <div class="columns">
+    <section class="column" aria-labelledby="drops">
+      <div class="section-head">
+        <h2 id="drops">Goedkoper geworden</h2>
+        <a href="/wijzigingen?richting=omlaag">Alle dalingen</a>
+      </div>
+      <p class="section-sub">Grootste prijsdalingen van de afgelopen 7 dagen.</p>
+      {% if drops.is_empty() %}<p class="empty">Geen prijsdalingen in de afgelopen 7 dagen.</p>{% else %}{% call m::change_list(drops) %}{% endcall %}{% endif %}
+    </section>
+    <section class="column" aria-labelledby="rises">
+      <div class="section-head">
+        <h2 id="rises">Duurder geworden</h2>
+        <a href="/wijzigingen?richting=omhoog">Alle stijgingen</a>
+      </div>
+      <p class="section-sub">Grootste prijsstijgingen van de afgelopen 7 dagen.</p>
+      {% if rises.is_empty() %}<p class="empty">Geen prijsstijgingen in de afgelopen 7 dagen.</p>{% else %}{% call m::change_list(rises) %}{% endcall %}{% endif %}
+    </section>
+  </div>
+{% endif %}
+</div>
+{% endblock %}

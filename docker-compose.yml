@@ -1,0 +1,18 @@
+services:
+  prijsspoor:
+    build: .
+    image: prijsspoor:latest
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      # Publieke URL van je installatie (gebruikt in API-links en documentatie).
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      SCRAPE_INTERVAL_HOURS: ${SCRAPE_INTERVAL_HOURS:-6}
+      # Optioneel: zet een token om handmatig een scrape te starten via POST /api/v1/admin/scrape.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+    volumes:
+      - prijsspoor-data:/data
+
+volumes:
+  prijsspoor-data:

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<div class="wrap">
+  <article class="product">
+    <div class="product-top">
+      <figure class="product-image">
+        {% if let Some(src) = p.image %}<img src="{{ src }}" alt="{{ p.name }}" width="280" height="280">{% else %}<span class="thumb-empty big" aria-hidden="true"></span>{% endif %}
+      </figure>
+      <div class="product-info">
+        {% if !p.brand.is_empty() %}<p class="product-brand">{{ p.brand }}</p>{% endif %}
+        <h1 class="product-name">{{ p.name }}</h1>
+        <p class="product-meta">
+          {% if !p.content.is_empty() %}<span>{{ p.content }}</span>{% endif %}
+          <span>Artikel {{ article_number }}</span>
+          {% if !offered_by.is_empty() %}<span>{{ offered_by }}</span>{% endif %}
+        </p>
+        {% if !long_name.is_empty() %}<p class="product-long">{{ long_name }}</p>{% endif %}
+
+        <div class="tag {% if p.is_red %}tag-red{% endif %}" aria-label="{% if let Some(t) = tag %}Huidige prijs € {{ t.euros }},{{ t.cents }}{% else %}Geen prijs bekend{% endif %}">
+          {% if let Some(t) = tag %}
+          <p class="tag-price" aria-hidden="true"><span class="tag-cur">€</span><span class="tag-eur">{{ t.euros }}</span><span class="tag-cents">,{{ t.cents }}</span></p>
+          {% else %}
+          <p class="tag-price tag-none">Geen prijs</p>
+          {% endif %}
+          <div class="tag-side">
+            {% if let Some(u) = p.unit_price %}<p class="tag-unit">{{ u }}</p>{% endif %}
+            {% if let Some(d) = p.delta %}<p class="tag-delta">{% call m::delta_badge(d) %}{% endcall %} <span class="muted">{{ d.amount }} {{ d.label }} dan voorheen</span></p>{% endif %}
+            {% if p.is_red %}<p class="tag-note">Rode prijs</p>{% endif %}
+            {% if let Some(r) = reference_price %}<p class="tag-note">Referentieprijs € {{ r }}</p>{% endif %}
+          </div>
+        </div>
+        {% if let Some(o) = offer %}<p class="offer">{{ o }}</p>{% endif %}
+        {% for promo in promos %}<p class="promo">{{ promo }}</p>{% endfor %}
+        {% if !p.available %}<p class="warning">Dit product is momenteel niet bestelbaar op Collect&amp;Go.</p>{% endif %}
+
+        <dl class="times">
+          {% if let Some(t) = last_updated %}<div><dt>Prijs laatst gecontroleerd</dt><dd><time datetime="{{ last_updated_iso }}">{{ t }}</time></dd></div>{% endif %}
+          {% if let Some(t) = last_changed %}<div><dt>Prijs laatst gewijzigd</dt><dd>{% if unchanged_since_start %}Niet gewijzigd sinds {{ tracked_since }}{% else %}{{ t }}{% endif %}</dd></div>{% endif %}
+        </dl>
+        {% if stale %}<p class="warning">Dit product stond bij de laatste ophaalrondes niet meer op Collect&amp;Go. De prijs hierboven is de laatst gekende.</p>{% endif %}
+        <p class="actions">
+          {% if let Some(u) = cogo_url %}<a class="button" href="{{ u }}" rel="noopener">Bekijk op Collect&amp;Go</a>{% endif %}
+          <a class="button button-quiet" href="{{ api_url }}">Als JSON</a>
+        </p>
+      </div>
+    </div>
+
+    <section class="history" aria-labelledby="chart-title">
+      <div class="section-head">
+        <h2 id="chart-title">Prijsverloop</h2>
+        {% if change_count > 0 %}<p class="section-sub" id="chart-desc">{{ change_count }} {% if change_count == 1 %}wijziging{% else %}wijzigingen{% endif %} sinds {{ tracked_since }}{% if let Some(l) = lowest %}, laagste prijs € {{ l }}{% endif %}{% if let Some(h) = highest %}, hoogste € {{ h }}{% endif %}.</p>
+        {% else %}<p class="section-sub" id="chart-desc">Sinds {{ tracked_since }} niet van prijs veranderd.</p>{% endif %}
+      </div>
+      {% if !chart_svg.is_empty() %}
+      <div class="chart" data-chart>
+        {{ chart_svg|safe }}
+        <div class="chart-tip" role="status" aria-live="polite" hidden><strong class="tip-price"></strong><span class="tip-when"></span></div>
+        <script type="application/json" class="chart-data">{{ chart_json|safe }}</script>
+      </div>
+      {% endif %}
+      <table class="history-table">
+        <caption class="visually-hidden">Alle prijzen van {{ p.name }}, nieuwste eerst</caption>
+        <thead><tr><th scope="col">Periode</th><th scope="col" class="num">Prijs</th><th scope="col" class="num">Verschil</th><th scope="col" class="hide-sm">Per eenheid</th><th scope="col" class="hide-sm">Hoeveelheidskorting</th></tr></thead>
+        <tbody>
+        {% for h in history %}
+          <tr>
+            <td>{{ h.period }}</td>
+            <td class="num"><span class="{% if h.is_red %}price-red{% endif %}">€ {{ h.price }}</span></td>
+            <td class="num">{% if let Some(d) = h.delta %}{% call m::delta_badge(d) %}{% endcall %}{% else %}<span class="muted">eerste prijs</span>{% endif %}</td>
+            <td class="hide-sm">{% if let Some(u) = h.unit_price %}{{ u }}{% endif %}</td>
+            <td class="hide-sm">{% if let Some(o) = h.offer %}{{ o }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </article>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/chart.js" defer></script>{% endblock %}

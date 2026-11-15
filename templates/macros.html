@@ -1,0 +1,25 @@
+{% macro delta_badge(d) %}<span class="delta delta-{{ d.dir }}"><span aria-hidden="true">{{ d.symbol }}</span> {{ d.percent }}<span class="visually-hidden"> {{ d.label }}</span></span>{% endmacro %}
+
+{% macro thumb(image) %}{% if let Some(src) = image %}<img class="thumb" src="{{ src }}" alt="" loading="lazy" width="56" height="56">{% else %}<span class="thumb thumb-empty" aria-hidden="true"></span>{% endif %}{% endmacro %}
+
+{% macro change_list(items) %}
+<ol class="receipt">
+{% for c in items %}
+  <li class="line">
+    <a class="line-link" href="/product/{{ c.id }}">
+      {% call thumb(c.image) %}{% endcall %}
+      <span class="line-name">
+        <span class="name">{{ c.name }}</span>
+        <span class="meta">{% if !c.content.is_empty() %}<span class="meta-item">{{ c.content }}</span>{% endif %}{% if !c.brand.is_empty() %}<span class="meta-item">{{ c.brand }}</span>{% endif %}<span class="meta-item">{{ c.when }}</span></span>
+      </span>
+      <span class="leader" aria-hidden="true"></span>
+      <span class="line-price">
+        <s class="old" aria-label="was € {{ c.old_price }}">{{ c.old_price }}</s>
+        <span class="price">€ {{ c.new_price }}</span>
+        {% if let Some(d) = c.delta %}{% call delta_badge(d) %}{% endcall %}{% endif %}
+      </span>
+    </a>
+  </li>
+{% endfor %}
+</ol>
+{% endmacro %}

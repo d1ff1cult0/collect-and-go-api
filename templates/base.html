@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if chrome.nav == "home" %}Prijsspoor: prijsgeschiedenis van Collect&amp;Go{% else %}{{ chrome.title }} | Prijsspoor{% endif %}</title>
+{% if !chrome.description.is_empty() %}<meta name="description" content="{{ chrome.description }}">{% endif %}
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/static/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<a class="skip" href="#inhoud">Naar de inhoud</a>
+<header class="masthead">
+  <div class="wrap masthead-row">
+    <a class="brand" href="/" aria-label="Prijsspoor, naar de startpagina">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 22 H11 V14 H19 V19 H29" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="29" cy="19" r="2.6" fill="currentColor"/></svg>
+      <span>Prijsspoor</span>
+    </a>
+    <nav class="nav" aria-label="Hoofdmenu">
+      <a href="/zoek" {% if chrome.nav == "search" %}aria-current="page"{% endif %}>Producten</a>
+      <a href="/wijzigingen" {% if chrome.nav == "changes" %}aria-current="page"{% endif %}>Wijzigingen</a>
+      <a href="/api" {% if chrome.nav == "api" %}aria-current="page"{% endif %}>API</a>
+    </nav>
+  </div>
+  {% if chrome.nav != "home" %}
+  <div class="wrap">
+    <form class="search search-compact" action="/zoek" method="get" role="search">
+      <label class="visually-hidden" for="q-top">Zoek een product of plak een Collect&amp;Go-link</label>
+      <input id="q-top" name="q" type="search" value="{{ chrome.q }}" placeholder="Zoek een product of plak een Collect&amp;Go-link" autocomplete="off">
+      <button type="submit">Zoeken</button>
+    </form>
+  </div>
+  {% endif %}
+</header>
+<main id="inhoud">
+{% block content %}{% endblock %}
+</main>
+<footer class="footer">
+  <div class="wrap footer-row">
+    <p>Prijzen van <a href="https://www.collectandgo.be">collectandgo.be</a>, elke zes uur opgehaald.{% if let Some(t) = chrome.last_update %} Laatst bijgewerkt {{ t }}.{% endif %}</p>
+    <p>Prijsspoor is een onafhankelijk project en hoort niet bij Colruyt Group. Kijk voor de juiste prijs altijd op Collect&amp;Go zelf.</p>
+  </div>
+</footer>
+{% block scripts %}{% endblock %}
+</body>
+</html>

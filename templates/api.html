@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap prose">
+  <h1>API</h1>
+  <p>Alle gegevens van Prijsspoor zijn als JSON beschikbaar, zonder sleutel. Bedragen zijn in euro, tijdstippen in UTC (ISO 8601). Wees redelijk met het aantal verzoeken: de prijzen veranderen hoogstens om de zes uur.</p>
+
+  <h2 id="price">Prijs opvragen met een Collect&amp;Go-link</h2>
+  <pre><code>GET {{ base }}/api/v1/price?url=&lt;link naar een productpagina&gt;</code></pre>
+  <p>Geef de volledige link van een productpagina op collectandgo.be mee (Nederlands of Frans, met of zonder <code>https://</code>). Codeer de link als querystring-parameter.</p>
+  <pre><code>curl -G '{{ base }}/api/v1/price' --data-urlencode 'url={{ example_url }}'</code></pre>
+  <p>Antwoord (ingekort):</p>
+<pre><code>{
+  "product": {
+    "id": "{{ example_id }}",
+    "article_number": "28856",
+    "name": "BONI walnootpitten 200g",
+    "brand": "Boni",
+    "content": "200g",
+    "url": "https://www.collectandgo.be/nl/assortiment/…",
+    "is_available": true,
+    "promotions": []
+  },
+  "price": {
+    "currency": "EUR",
+    "price": 3.19,
+    "unit_price": 15.95,
+    "unit": "kg",
+    "offer": { "price": 3.06, "min_quantity": 3, "unit_price": 15.3 },
+    "reference_price": null,
+    "is_red_price": false
+  },
+  "last_updated_at": "2026-11-15T18:00:04Z",
+  "last_changed_at": "2026-11-02T06:00:03Z",
+  "previous_price": 3.29,
+  "tracked_since": "2026-10-20T12:00:01Z",
+  "history_url": "{{ base }}/api/v1/products/{{ example_id }}/history",
+  "page_url": "{{ base }}/product/{{ example_id }}"
+}</code></pre>
+  <dl class="fields">
+    <dt><code>last_updated_at</code></dt><dd>Wanneer we deze prijs voor het laatst op Collect&amp;Go zagen.</dd>
+    <dt><code>last_changed_at</code></dt><dd>Wanneer de huidige prijs voor het eerst verscheen, dus het moment van de laatste prijswijziging. Is deze gelijk aan <code>tracked_since</code>, dan veranderde de prijs niet sinds we het product volgen.</dd>
+    <dt><code>previous_price</code></dt><dd>De prijs vóór de laatste wijziging, of <code>null</code>.</dd>
+    <dt><code>offer</code></dt><dd>Hoeveelheidskorting: de stukprijs als je minstens <code>min_quantity</code> stuks koopt.</dd>
+  </dl>
+  <p>Foutcodes: <code>400</code> als de link geen Collect&amp;Go-productpagina is, <code>404</code> als er op die link geen product staat, <code>502</code> als Collect&amp;Go niet antwoordt. De body is dan <code>{"error": "…", "status": 404}</code>.</p>
+
+  <h2 id="products">Producten zoeken</h2>
+  <pre><code>GET {{ base }}/api/v1/products?q=koffie&amp;page=1&amp;per_page=24&amp;sort=prijs&amp;available=true</code></pre>
+  <p><code>sort</code> is <code>relevantie</code> (standaard), <code>prijs</code>, <code>prijs_desc</code>, <code>naam</code> of <code>gewijzigd</code>. <code>per_page</code> is maximaal 100.</p>
+
+  <h2 id="product">Eén product</h2>
+  <pre><code>GET {{ base }}/api/v1/products/{id}</code></pre>
+  <p><code>id</code> is het Collect&amp;Go-product-ID of het artikelnummer. Het antwoord heeft dezelfde vorm als hierboven.</p>
+
+  <h2 id="history">Prijsgeschiedenis</h2>
+  <pre><code>GET {{ base }}/api/v1/products/{id}/history</code></pre>
+  <p>Geeft elke prijsperiode, oudste eerst: <code>{"price", "unit_price", "offer_price", "offer_min_quantity", "reference_price", "is_red_price", "from", "until"}</code>. <code>from</code> is de eerste en <code>until</code> de laatste waarneming van die prijs.</p>
+
+  <h2 id="changes">Recente wijzigingen</h2>
+  <pre><code>GET {{ base }}/api/v1/changes?days=7&amp;direction=down&amp;limit=50</code></pre>
+  <p><code>direction</code> is <code>down</code>, <code>up</code> of weggelaten voor alle wijzigingen.</p>
+
+  <h2 id="status">Status</h2>
+  <pre><code>GET {{ base }}/api/v1/status</code></pre>
+  <p>Aantal producten en prijzen en de laatste ophaalrondes.</p>
+</div>
+{% endblock %}

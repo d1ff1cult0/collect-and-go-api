@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <h1>{% if chrome.q.is_empty() %}Alle producten{% else %}Resultaten voor “{{ chrome.q }}”{% endif %}</h1>
+    <p class="count">{{ total }} {% if total_n == 1 %}product{% else %}producten{% endif %}</p>
+  </div>
+  <form class="filters" action="/zoek" method="get">
+    <input type="hidden" name="q" value="{{ chrome.q }}">
+    <label>Sorteren
+      <select name="sort" onchange="this.form.submit()">
+        {% for s in sorts %}<option value="{{ s.value }}" {% if s.selected %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" name="beschikbaar" value="1" {% if only_available %}checked{% endif %} onchange="this.form.submit()"> Enkel bestelbare producten</label>
+    <noscript><button type="submit">Toepassen</button></noscript>
+  </form>
+
+  {% if results.is_empty() %}
+  <section class="notice">
+    <h2>Geen producten gevonden</h2>
+    <p>Probeer een korter of ander woord, bijvoorbeeld enkel het merk of de productsoort. Een link naar een productpagina op collectandgo.be werkt ook.</p>
+  </section>
+  {% else %}
+  <ol class="receipt receipt-results">
+  {% for r in results %}
+    <li class="line {% if !r.available %}line-unavailable{% endif %}">
+      <a class="line-link" href="/product/{{ r.id }}">
+        {% call m::thumb(r.image) %}{% endcall %}
+        <span class="line-name">
+          <span class="name">{{ r.name }}</span>
+          <span class="meta">{% if !r.content.is_empty() %}<span class="meta-item">{{ r.content }}</span>{% endif %}{% if !r.brand.is_empty() %}<span class="meta-item">{{ r.brand }}</span>{% endif %}{% if !r.available %}<span class="meta-item">niet bestelbaar</span>{% endif %}{% if r.has_promo %}<span class="meta-item promo-flag">promotie</span>{% endif %}</span>
+        </span>
+        <span class="leader" aria-hidden="true"></span>
+        <span class="line-price">
+          {% if let Some(price) = r.price %}<span class="price {% if r.is_red %}price-red{% endif %}">€ {{ price }}</span>{% else %}<span class="price price-none">geen prijs</span>{% endif %}
+          {% if let Some(d) = r.delta %}{% call m::delta_badge(d) %}{% endcall %}{% endif %}
+          {% if let Some(u) = r.unit_price %}<span class="unit">{{ u }}</span>{% endif %}
+        </span>
+      </a>
+    </li>
+  {% endfor %}
+  </ol>
+  {% if !pages.is_empty() %}
+  <nav class="pager" aria-label="Paginering">
+    {% if let Some(h) = prev %}<a href="{{ h }}" rel="prev">Vorige</a>{% endif %}
+    {% for pg in pages %}{% if pg.current %}<span aria-current="page">{{ pg.number }}</span>{% else %}<a href="{{ pg.href }}">{{ pg.number }}</a>{% endif %}{% endfor %}
+    {% if let Some(h) = next %}<a href="{{ h }}" rel="next">Volgende</a>{% endif %}
+  </nav>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

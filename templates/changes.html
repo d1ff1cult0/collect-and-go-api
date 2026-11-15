@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <h1>{{ heading }}</h1>
+    <p class="count">{{ changes.len() }} {% if changes.len() == 1 %}product{% else %}producten{% endif %}</p>
+  </div>
+  <div class="filters">
+    <nav class="segmented" aria-label="Richting">{% for c in directions %}<a href="{{ c.href }}" {% if c.current %}aria-current="page"{% endif %}>{{ c.label }}</a>{% endfor %}</nav>
+    <nav class="segmented" aria-label="Periode">{% for c in periods %}<a href="{{ c.href }}" {% if c.current %}aria-current="page"{% endif %}>{{ c.label }}</a>{% endfor %}</nav>
+  </div>
+  {% if changes.is_empty() %}
+  <section class="notice">
+    <h2>Geen wijzigingen in deze periode</h2>
+    <p>Kies een langere periode. Prijzen worden elke zes uur gecontroleerd, dus nieuwe wijzigingen verschijnen hier vanzelf.</p>
+  </section>
+  {% else %}
+  {% call m::change_list(changes) %}{% endcall %}
+  {% endif %}
+</div>
+{% endblock %}
