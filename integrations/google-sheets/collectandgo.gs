@@ -7,7 +7,8 @@
  *
  * Prijzen kleuren: Extensies > Prijsspoor > Prijzen controleren kleurt op alle tabbladen elke
  * prijs naast een Collect&Go- of bol.com-link groen of rood (zie controleer_ hieronder). Daarna
- * gebeurt dat ook vanzelf telkens de spreadsheet geopend wordt.
+ * gebeurt dat ook vanzelf telkens de spreadsheet geopend wordt, en voor een rij zodra iemand
+ * ze aanpast.
  *
  * Formules, in elke cel:
  *
@@ -94,8 +95,8 @@ function onOpen(e) {
     .addItem('Prijzen controleren (dit tabblad)', 'controleerDitBlad')
     .addItem('Kleuren wissen (dit tabblad)', 'wisKleuren')
     .addSeparator()
-    .addItem('Automatisch controleren bij openen: aanzetten', 'zetAutomatischAan')
-    .addItem('Automatisch controleren bij openen: uitzetten', 'zetAutomatischUit')
+    .addItem('Automatisch controleren (openen/bewerken): aanzetten', 'zetAutomatischAan')
+    .addItem('Automatisch controleren (openen/bewerken): uitzetten', 'zetAutomatischUit')
     .addSeparator()
     .addItem('Formules vernieuwen', 'vernieuwPrijzen')
     .addItem('Hoe gebruik ik dit?', 'toonHulp')
@@ -118,7 +119,8 @@ function toonHulp() {
       'bol.com-link:\n' +
       '    groen = klopt, rood = anders (de echte prijs staat in de notitie),\n' +
       '    oranje = product niet gevonden.\n' +
-      'Na de eerste keer gebeurt dat ook vanzelf telkens de spreadsheet geopend wordt\n' +
+      'Na de eerste keer gebeurt dat ook vanzelf telkens de spreadsheet geopend wordt,\n' +
+      'en een rij opnieuw zodra je er een prijs, aantal of link aanpast\n' +
       '(uitzetten kan in het menu).\n\n' +
       'Een hoeveelheidskorting ("€ 4,05 vanaf 3 st.") telt enkel als de kolom "Eenheden"\n' +
       '(of "Aantal") op die rij minstens zoveel stuks toont.\n' +
@@ -362,14 +364,14 @@ const KOP_AANTAL = /^\s*aantal\s*$/i;
 /** Menu: alle tabbladen. */
 function controleerAlles() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  controleer_(ss, ss.getSheets(), false);
+  controleer_(ss, ss.getSheets(), 'menu');
   zetAutomatischAanEersteKeer_(ss);
 }
 
 /** Menu: enkel het actieve tabblad. */
 function controleerDitBlad() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  controleer_(ss, [ss.getActiveSheet()], false);
+  controleer_(ss, [ss.getActiveSheet()], 'menu');
   zetAutomatischAanEersteKeer_(ss);
 }
 
@@ -383,20 +385,25 @@ function controleerDitBlad() {
  * hoeveelheidskorting) staat in de kolom "Eenheden" op diezelfde koprij, of anders "Aantal",
  * links van de prijs.
  *
- * `stil`: vanuit de trigger bij het openen, dus geen dialoogvensters.
+ * `modus`: 'menu' (handmatig), 'open' (trigger bij het openen: geen dialoogvensters) of
+ * 'bewerk' (trigger bij een bewerking: enkel de rijen `rijen` = { van, tot }, 0-based, op het
+ * ene blad, en enkel een melding als er een kleur verandert).
  */
-function controleer_(ss, sheets, stil) {
+function controleer_(ss, sheets, modus, rijen) {
   const perBlad = [];
   let zonderKolom = 0;
   sheets.forEach(function (sheet) {
     const range = sheet.getDataRange();
     const waarden = range.getValues();
     const items = [];
-    if (waarden.length > 1 || waarden[0].length > 1) {
-      const opmaak = range.getRichTextValues();
-      for (let r = 0; r < waarden.length; r++) {
+    const van = rijen ? Math.max(0, rijen.van) : 0;
+    const tot = rijen ? Math.min(waarden.length - 1, rijen.tot) : waarden.length - 1;
+    if ((waarden.length > 1 || waarden[0].length > 1) && van <= tot) {
+      // Bij een bewerking enkel de opmaak (links) van de bewerkte rijen lezen.
+      const opmaak = sheet.getRange(van + 1, 1, tot - van + 1, waarden[0].length).getRichTextValues();
+      for (let r = van; r <= tot; r++) {
         for (let c = 0; c < waarden[r].length; c++) {
-          const url = linkUitRich_(opmaak[r][c]) || linkUitTekst_(waarden[r][c]);
+          const url = linkUitRich_(opmaak[r - van][c]) || linkUitTekst_(waarden[r][c]);
           if (!url) continue;
           const kop = prijsKop_(waarden, r);
           if (!kop) {
@@ -419,7 +426,7 @@ function controleer_(ss, sheets, stil) {
 
   const aantalLinks = perBlad.reduce(function (n, b) { return n + b.items.length; }, 0);
   if (!aantalLinks) {
-    if (!stil) {
+    if (modus === 'menu') {
       SpreadsheetApp.getUi().alert(sheets.length > 1
         ? 'Geen Collect&Go- of bol.com-links gevonden in deze spreadsheet.'
         : 'Geen Collect&Go- of bol.com-links gevonden op dit tabblad.');
@@ -435,6 +442,7 @@ function controleer_(ss, sheets, stil) {
   const tijd = Utilities.formatDate(new Date(), 'Europe/Brussels', 'd/MM HH:mm');
   const telling = { ok: 0, fout: 0, onbekend: 0 };
   const foutBladen = [];
+  const gewijzigd = []; // voor de melding na een bewerking
 
   perBlad.forEach(function (b) {
     const sleutel = 'cg_kleuren_' + b.sheet.getSheetId();
@@ -461,10 +469,25 @@ function controleer_(ss, sheets, stil) {
       // Niets veranderd: niet opnieuw schrijven (scheelt tijd en ruis in de versiegeschiedenis).
       if (huidigeKleur === kleur && huidigeNotitie.replace(/ \(\d+\/\d+ \d+:\d+\)$/, '') === notitie) return;
       cel.setBackground(kleur).setNote(notitie + ' (' + tijd + ')');
+      if (huidigeKleur !== kleur) gewijzigd.push({ a1: a1, status: oordeel.status, notitie: oordeel.notitie });
     });
     props.setProperty(sleutel, JSON.stringify(origineel));
     if (fouten) foutBladen.push(b.sheet.getName() + ' (' + fouten + ')');
   });
+
+  if (modus === 'bewerk') {
+    // Enkel iets melden als een kleur veranderde, en dan kort.
+    if (!gewijzigd.length) return;
+    const tekst = gewijzigd.slice(0, 3).map(function (g) {
+      return g.a1 + (g.status === 'ok' ? ': klopt nu' : ': ' + g.notitie);
+    }).join(' · ');
+    try {
+      ss.toast(tekst, 'Prijsspoor', gewijzigd.some(function (g) { return g.status === 'fout'; }) ? 12 : 5);
+    } catch (err) {
+      // geen venster
+    }
+    return;
+  }
 
   let bericht = telling.ok + ' klopt, ' + telling.fout + ' verschilt';
   if (telling.onbekend) bericht += ', ' + telling.onbekend + ' niet gevonden';
@@ -522,16 +545,20 @@ function euro_(x) {
   return '€ ' + x.toFixed(2).replace('.', ',');
 }
 
-// --- automatisch bij openen -----------------------------------------------------------
+// --- automatisch bij openen en bij bewerken --------------------------------------------
 //
-// Een gewone onOpen mag niets ophalen. Daarom een installeerbare trigger per spreadsheet: die
-// draait met de rechten van wie hem aanzette, telkens iemand met bewerkrechten de spreadsheet
-// opent. Eén persoon volstaat dus voor iedereen. De trigger komt er vanzelf bij de eerste
-// keer "Prijzen controleren", tenzij iemand hem eerder uitzette.
+// Een gewone onOpen/onEdit mag niets ophalen. Daarom twee installeerbare triggers per
+// spreadsheet: die draaien met de rechten van wie ze aanzette, telkens iemand met
+// bewerkrechten de spreadsheet opent of iets aanpast. Eén persoon volstaat dus voor iedereen.
+// De triggers komen er vanzelf bij de eerste keer "Prijzen controleren", tenzij iemand ze
+// eerder uitzette.
 
 const AUTO = 'cg_auto'; // 'aan' of 'uit' in de documenteigenschappen
 const AUTO_LAATST = 'cg_auto_laatst';
 const AUTO_HANDLER = 'automatischBijOpenen';
+const BEWERK_HANDLER = 'opnieuwBijBewerken';
+/** Plakt iemand een groot blok, dan niet alles bij elke bewerking: daarvoor is het menu er. */
+const BEWERK_MAX_RIJEN = 200;
 const AUTO_PAUZE_MS = 10 * 60 * 1000;
 
 /** De trigger: alle tabbladen controleren, hoogstens één keer per tien minuten. */
@@ -539,6 +566,12 @@ function automatischBijOpenen(e) {
   const ss = (e && e.source) || SpreadsheetApp.getActiveSpreadsheet();
   const props = PropertiesService.getDocumentProperties();
   if (props.getProperty(AUTO) === 'uit') return;
+  // Spreadsheets die automatisch controleren al hadden vóór de trigger bij bewerken bestond.
+  try {
+    maakTrigger_(ss);
+  } catch (err) {
+    console.warn('trigger niet aangemaakt: ' + err);
+  }
   // Openen meerdere mensen tegelijk, of hebben twee mensen een trigger: één controle volstaat.
   const lock = LockService.getDocumentLock();
   if (lock && !lock.tryLock(2000)) return;
@@ -554,17 +587,35 @@ function automatischBijOpenen(e) {
   } catch (err) {
     // geen venster
   }
-  controleer_(ss, ss.getSheets(), true);
+  controleer_(ss, ss.getSheets(), 'open');
 }
 
-function heeftTrigger_(ss) {
+/**
+ * De trigger bij een bewerking: de bewerkte rijen opnieuw controleren. Zo wordt een prijs die
+ * iemand verbetert meteen groen (of een aantal dat te klein wordt voor de korting meteen rood).
+ * De kleuren en notities die Prijsspoor zelf zet, starten deze trigger niet opnieuw.
+ */
+function opnieuwBijBewerken(e) {
+  if (!e || !e.range) return;
+  if (PropertiesService.getDocumentProperties().getProperty(AUTO) === 'uit') return;
+  const range = e.range;
+  if (range.getNumRows() > BEWERK_MAX_RIJEN) return;
+  const sheet = range.getSheet();
+  controleer_(e.source || sheet.getParent(), [sheet], 'bewerk', {
+    van: range.getRow() - 1,
+    tot: range.getLastRow() - 1,
+  });
+}
+
+function heeftTrigger_(ss, handler) {
   return ScriptApp.getUserTriggers(ss).some(function (t) {
-    return t.getHandlerFunction() === AUTO_HANDLER;
+    return t.getHandlerFunction() === handler;
   });
 }
 
 function maakTrigger_(ss) {
-  if (!heeftTrigger_(ss)) ScriptApp.newTrigger(AUTO_HANDLER).forSpreadsheet(ss).onOpen().create();
+  if (!heeftTrigger_(ss, AUTO_HANDLER)) ScriptApp.newTrigger(AUTO_HANDLER).forSpreadsheet(ss).onOpen().create();
+  if (!heeftTrigger_(ss, BEWERK_HANDLER)) ScriptApp.newTrigger(BEWERK_HANDLER).forSpreadsheet(ss).onEdit().create();
 }
 
 /** Na de eerste handmatige controle: automatisch aanzetten, tenzij iemand het uitzette. */
@@ -574,8 +625,8 @@ function zetAutomatischAanEersteKeer_(ss) {
   try {
     maakTrigger_(ss);
     props.setProperty(AUTO, 'aan');
-    ss.toast('Vanaf nu controleert Prijsspoor de prijzen telkens deze spreadsheet geopend wordt. ' +
-      'Uitzetten: Extensies > Prijsspoor.', 'Prijsspoor', 10);
+    ss.toast('Vanaf nu controleert Prijsspoor de prijzen telkens deze spreadsheet geopend wordt, ' +
+      'en een rij opnieuw zodra je ze aanpast. Uitzetten: Extensies > Prijsspoor.', 'Prijsspoor', 10);
   } catch (err) {
     // Bv. geen toestemming voor triggers: dan blijft het bij handmatig controleren.
     console.warn('automatisch controleren niet aangezet: ' + err);
@@ -591,7 +642,9 @@ function zetAutomatischAan() {
     'Automatisch controleren staat aan',
     'Telkens iemand deze spreadsheet opent, controleert Prijsspoor de prijzen op alle ' +
       'tabbladen (hoogstens één keer per tien minuten). De kleuren verschijnen na enkele ' +
-      'seconden; de cellen worden enkel aangepast als er iets veranderde.',
+      'seconden; de cellen worden enkel aangepast als er iets veranderde.\n\n' +
+      'Past iemand een prijs, aantal of link aan, dan wordt die rij meteen opnieuw ' +
+      'gecontroleerd: een verbeterde prijs wordt vanzelf groen.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }
@@ -600,12 +653,13 @@ function zetAutomatischAan() {
 function zetAutomatischUit() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ScriptApp.getUserTriggers(ss).forEach(function (t) {
-    if (t.getHandlerFunction() === AUTO_HANDLER) ScriptApp.deleteTrigger(t);
+    const h = t.getHandlerFunction();
+    if (h === AUTO_HANDLER || h === BEWERK_HANDLER) ScriptApp.deleteTrigger(t);
   });
   PropertiesService.getDocumentProperties().setProperty(AUTO, 'uit');
   SpreadsheetApp.getUi().alert(
     'Automatisch controleren staat uit',
-    'De prijzen worden niet meer gecontroleerd bij het openen van deze spreadsheet. ' +
+    'De prijzen worden niet meer gecontroleerd bij het openen of bewerken van deze spreadsheet. ' +
       'Handmatig kan nog altijd via Extensies > Prijsspoor > Prijzen controleren.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );

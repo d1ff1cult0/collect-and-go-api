@@ -25,12 +25,18 @@ De prijscel is de cel op dezelfde rij, in de kolom van de dichtstbijzijnde kop
 *Kleuren wissen* komen de oorspronkelijke achtergronden van het tabblad terug en verdwijnen de
 notities. *Prijzen controleren (dit tabblad)* doet enkel het actieve tabblad.
 
-**Automatisch bij het openen.** Na de eerste keer *Prijzen controleren* gebeurt de controle
-vanzelf, op alle tabbladen, telkens iemand de spreadsheet opent (hoogstens één keer per tien
-minuten). De kleuren verschijnen na enkele seconden; cellen worden enkel herschreven als er iets
-veranderde. Eén persoon die het aanzet volstaat voor iedereen: de controle draait met de rechten
-van die persoon. Uit- of weer aanzetten: *Extensies > Prijsspoor > Automatisch controleren bij
-openen*. Uitzetten geldt voor iedereen.
+**Automatisch bij het openen en bij bewerken.** Na de eerste keer *Prijzen controleren* gebeurt
+de controle vanzelf:
+
+- telkens iemand de spreadsheet opent: alle tabbladen, hoogstens één keer per tien minuten. De
+  kleuren verschijnen na enkele seconden; cellen worden enkel herschreven als er iets veranderde;
+- telkens iemand een cel aanpast op een rij met een link (de prijs, het aantal of de link zelf):
+  die rij opnieuw. Een verbeterde prijs wordt dus meteen groen, en een aantal dat te klein wordt
+  voor de korting meteen rood. Een melding verschijnt enkel als een kleur verandert.
+
+Eén persoon die het aanzet volstaat voor iedereen: de controle draait met de rechten van die
+persoon. Uit- of weer aanzetten: *Extensies > Prijsspoor > Automatisch controleren
+(openen/bewerken)*. Uitzetten geldt voor iedereen.
 
 **Hoeveelheidskorting.** Collect&Go geeft soms korting vanaf een aantal stuks ("€ 4,05/st vanaf
 3 st"). Die prijs is enkel groen als je minstens zoveel stuks neemt. Het aantal komt uit de kolom
