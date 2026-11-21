@@ -1,31 +1,52 @@
 # Prijsspoor voor Google Sheets
 
-Controleert de Collect&Go-prijzen in een spreadsheet met de Prijsspoor-API
-(`https://c-en-g.vtk.be`). De add-on leest de Collect&Go-link in een cel, ook als die achter
-tekst zit (Invoegen > Link), en vergelijkt de prijs. Dat kan een productpagina zijn
-(`.../nl/assortiment/<product>`) of een zoek- of categoriepagina waarop je een product hebt
-opengeklikt (`.../nl/zoek?searchTerm=...#pdp_<nummer>`).
+Controleert de Collect&Go- en bol.com-prijzen in een spreadsheet met de Prijsspoor-API
+(`https://c-en-g.vtk.be`). De add-on leest de link in een cel, ook als die achter tekst zit
+(Invoegen > Link), en vergelijkt de prijs. Dat kan zijn:
+
+- een Collect&Go-productpagina (`.../nl/assortiment/<product>`);
+- een Collect&Go-zoek- of categoriepagina waarop je een product hebt opengeklikt
+  (`.../nl/zoek?searchTerm=...#pdp_<nummer>` of `.../nl/assortiment/suiker-pak#pdp_<nummer>`);
+- een bol.com-product op de Belgische site (`https://www.bol.com/be/nl/p/<naam>/<nummer>/`).
 
 ## Gebruik
 
-**Prijzen kleuren.** Kies *Extensies > Prijsspoor > Prijzen controleren (groen/rood)*. Op het
-actieve blad krijgt elke prijs naast een Collect&Go-link een kleur:
+**Prijzen kleuren.** Kies *Extensies > Prijsspoor > Prijzen controleren (alle tabbladen)*. Op
+elk tabblad krijgt elke prijs naast een Collect&Go- of bol.com-link een kleur:
 
 | Kleur | Betekenis |
 |---|---|
-| groen | de prijs klopt (ook als het de prijs met hoeveelheidskorting is) |
-| rood | Collect&Go vraagt nu iets anders; de echte prijs staat in de notitie op de cel |
-| oranje | het product is niet gevonden op Collect&Go |
+| groen | de prijs klopt (de prijs met hoeveelheidskorting enkel als je genoeg stuks neemt) |
+| rood | de winkel vraagt nu iets anders, of de bol.com-link gaat niet naar bol.com/be/nl; uitleg en echte prijs staan in de notitie op de cel |
+| oranje | het product is niet gevonden |
 
 De prijscel is de cel op dezelfde rij, in de kolom van de dichtstbijzijnde kop
 **"Prijs per eenheid"** of **"Prijs per stuk"** erboven, zoals in het budgetsjabloon. Met
-*Kleuren wissen* komen de oorspronkelijke achtergronden terug en verdwijnen de notities.
+*Kleuren wissen* komen de oorspronkelijke achtergronden van het tabblad terug en verdwijnen de
+notities. *Prijzen controleren (dit tabblad)* doet enkel het actieve tabblad.
+
+**Automatisch bij het openen.** Na de eerste keer *Prijzen controleren* gebeurt de controle
+vanzelf, op alle tabbladen, telkens iemand de spreadsheet opent (hoogstens één keer per tien
+minuten). De kleuren verschijnen na enkele seconden; cellen worden enkel herschreven als er iets
+veranderde. Eén persoon die het aanzet volstaat voor iedereen: de controle draait met de rechten
+van die persoon. Uit- of weer aanzetten: *Extensies > Prijsspoor > Automatisch controleren bij
+openen*. Uitzetten geldt voor iedereen.
+
+**Hoeveelheidskorting.** Collect&Go geeft soms korting vanaf een aantal stuks ("€ 4,05/st vanaf
+3 st"). Die prijs is enkel groen als je minstens zoveel stuks neemt. Het aantal komt uit de kolom
+**"Eenheden"** op dezelfde koprij als de prijs, of anders **"Aantal"** (telkens de dichtstbijzijnde
+links van de prijs). Staat er geen van beide, dan is de kortingsprijs rood.
+
+**bol.com.** Enkel links naar de Belgische site tellen: `bol.com/be/nl/...`. Een link naar
+`bol.com/nl/...` (de Nederlandse site, met andere prijzen) is meteen rood, zonder iets op te
+vragen. Prijsspoor haalt bol.com-prijzen op wanneer de spreadsheet erom vraagt en bewaart ze een
+uur.
 
 **Formules.** Voor wie liever met formules werkt:
 
 | Formule | Geeft |
 |---|---|
-| `=CGCHECK(I45; O45)` | `✓`, `✓ (vanaf 3 st.)` of `✗ C&G: € 16,45` |
+| `=CGCHECK(I45; O45; H45)` | `✓`, `✓ (vanaf 3 st.)`, `✗ C&G: € 16,45`, `✗ bol: € 9,99` of `✗ korting pas vanaf 3 st., C&G: € 4,49` (H45 = aantal stuks, optioneel) |
 | `=CGPRIJS(O45)` | de huidige prijs als getal |
 | `=CGPRIJS(O45; "laatst_gewijzigd")` | ook: `eenheidsprijs`, `eenheid`, `korting`, `korting_vanaf`, `naam`, `beschikbaar`, `laatst_gecontroleerd`, `vorige_prijs` |
 
@@ -79,7 +100,7 @@ Je hebt nodig:
    - *Branding*: appnaam **Prijsspoor**, supportmail, het logo `assets/icon-128.png`, en als links
      `https://c-en-g.vtk.be/` (startpagina) en `https://c-en-g.vtk.be/privacy` (privacybeleid).
    - *Doelgroep*: **Intern**.
-   - *Gegevenstoegang*: voeg de drie scopes uit `appsscript.json` toe.
+   - *Gegevenstoegang*: voeg de vier scopes uit `appsscript.json` toe.
 3. Noteer het **projectnummer** (*Cloud-overzicht > Dashboard*).
 4. Terug in Apps Script: *Projectinstellingen > Google Cloud Platform-project > Project wijzigen*
    en vul het projectnummer in.
@@ -102,7 +123,7 @@ In het Cloud-project: *API's en services > Bibliotheek* > **Google Workspace Mar
 - **App-integratie**: niet *Google Workspace add-on*, maar alleen **Sheets add-on** aanvinken
   (dat is het editor-add-on-type). Vul het **Script-ID** in en bij *Script version* het
   **versienummer** uit stap 3 (bv. `1`), niet de implementatie-ID.
-- **OAuth-scopes**: dezelfde drie als in `appsscript.json`.
+- **OAuth-scopes**: dezelfde vier als in `appsscript.json`.
 - **Ontwikkelaarsgegevens**: naam, `https://c-en-g.vtk.be/` en een mailadres.
 - *Opslaan*.
 
@@ -129,7 +150,8 @@ Het kan tot 24 uur duren voor iedereen hem ziet.
 
 ### 6. Voor collega's
 
-In elke spreadsheet: *Extensies > Prijsspoor > Prijzen controleren (groen/rood)*. Wie formules
+In elke spreadsheet één keer: *Extensies > Prijsspoor > Prijzen controleren (alle tabbladen)*.
+Daarna gebeurt het vanzelf bij elk openen. Wie formules
 wil gebruiken, kiest eerst één keer *Extensies > Prijsspoor > Hoe gebruik ik dit?*: Google maakt
 `CGCHECK` en `CGPRIJS` in een spreadsheet pas beschikbaar nadat de add-on daar één keer gebruikt
 is.
@@ -143,11 +165,19 @@ is.
 
 Gebruikers krijgen de nieuwe versie vanzelf.
 
+**Nieuwe scope sinds het automatisch controleren.** `script.scriptapp` (installeerbare triggers)
+is nieuw. Voeg hem toe in het Cloud-project (*Google Auth Platform > Gegevenstoegang*) en in de
+Marketplace-configuratie (*App-configuratie > OAuth-scopes*), en publiceer de nieuwe versie. In
+de Admin console moet de beheerder daarna de nieuwe rechten van Prijsspoor goedkeuren (*Apps >
+Google Workspace Marketplace-apps > Prijsspoor*); tot dan blijft de oude versie actief.
+Gebruikers die de add-on zelf installeerden, krijgen bij het volgende menu-item een
+toestemmingsvenster.
+
 ## Bestanden
 
 | Bestand | Wat |
 |---|---|
 | `collectandgo.gs` | de code (zowel add-on als script in één spreadsheet) |
-| `appsscript.json` | manifest: scopes, en `UrlFetch` alleen naar `https://c-en-g.vtk.be/` |
+| `appsscript.json` | manifest: scopes, en `UrlFetch` alleen naar `https://c-en-g.vtk.be/` (ook bol.com gaat langs Prijsspoor) |
 | `.clasp.json.example`, `.claspignore` | voor `clasp push` |
 | `assets/` | icoontjes en kaartbanner voor de Marketplace |

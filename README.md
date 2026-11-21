@@ -50,6 +50,14 @@ curl -G http://localhost:8080/api/v1/price \
 - `last_changed_at`: eerste waarneming van de huidige prijs, dus de laatste prijswijziging. Is
   dit gelijk aan `tracked_since`, dan is de prijs niet veranderd sinds het product gevolgd wordt.
 
+Hetzelfde endpoint aanvaardt ook een **bol.com**-link, maar enkel naar de Belgische site
+(`https://www.bol.com/be/nl/p/<naam>/<nummer>/`; `bol.com/nl/...` geeft 400). bol.com wordt niet
+gescraped: Prijsspoor haalt die ene productpagina op wanneer erom gevraagd wordt (hoogstens twee
+tegelijk), leest de prijs uit de schema.org-gegevens en bewaart het antwoord een uur in het
+geheugen. Het antwoord heeft `"source": "bol.com"` en dezelfde velden `product` en `price`
+(zonder hoeveelheidskorting of geschiedenis). Weigert bol.com het IP van de server (403), dan
+gaat de aanvraag langs de relay, als die er is.
+
 Andere endpoints:
 
 | Endpoint | Beschrijving |
@@ -126,10 +134,11 @@ Hoe de relay werkt:
    (Playwright, met een venster op een virtueel scherm). Die houdt één Collect&Go-pagina open,
    haalt pagina's op vanuit die pagina en zit een wachtpagina van de botbeveiliging uit zoals
    een bezoeker. Lukt dat niet, dan antwoordt de relay tien minuten lang meteen 456.
+3. bol.com gaat enkel langs stap 1, met de headers die een gewone browser meestuurt.
 
 Wat de relay bewust niet doet: captcha's oplossen, een browservingerafdruk of de
 challenge-handtekening van de API namaken, of als open proxy werken. Hij vraagt een geheim,
-opent enkel https-adressen van `collectandgo.be` (`RELAY_HOSTS`) en doet hoogstens twee
+opent enkel https-adressen van `collectandgo.be` en `bol.com` (`RELAY_HOSTS`) en doet hoogstens twee
 opvragingen tegelijk. Antwoorden gaan gecomprimeerd terug: een volledige scrape kost ±24 MB
 upload vanaf de thuisverbinding.
 

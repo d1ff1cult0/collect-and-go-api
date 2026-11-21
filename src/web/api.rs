@@ -13,6 +13,7 @@ use super::{
     view::{HistoryPointJson, ProductPriceJson, image_url},
 };
 use crate::{
+    bol::{self, BolError, BolProductPriceJson},
     db,
     scraper::{self, ResolveError},
     util::cents_to_f64,
@@ -66,16 +67,32 @@ pub struct PriceQuery {
     url: Option<String>,
 }
 
-/// `GET /api/v1/price?url=<collect&go-product-url>`
-pub async fn price_by_url(
-    state: State,
-    Query(q): Query<PriceQuery>,
-) -> ApiResult<ProductPriceJson> {
+impl From<BolError> for ApiError {
+    fn from(e: BolError) -> Self {
+        let status = match &e {
+            BolError::BadUrl(_) => StatusCode::BAD_REQUEST,
+            BolError::NotFound => StatusCode::NOT_FOUND,
+            BolError::Upstream(_) => StatusCode::BAD_GATEWAY,
+        };
+        ApiError(status, e.to_string())
+    }
+}
+
+/// `GET /api/v1/price?url=<collect&go- of bol.com-productlink>`
+pub async fn price_by_url(state: State, Query(q): Query<PriceQuery>) -> Result<Response, ApiError> {
     let url = q
         .url
         .filter(|u| !u.trim().is_empty())
         .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "parameter `url` ontbreekt".into()))?;
-    let id = scraper::resolve_url(&state, &url).await?;
+    if bol::is_bol_url(&url) {
+        let (product, seen_at) = state.bol.product(&url).await?;
+        return Ok(Json(BolProductPriceJson::new(product, seen_at)).into_response());
+    }
+    Ok(cogo_price(&state, &url).await?.into_response())
+}
+
+async fn cogo_price(state: &crate::AppState, url: &str) -> ApiResult<ProductPriceJson> {
+    let id = scraper::resolve_url(state, url).await?;
     let row = db::product(&state.db, &id)
         .await?
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "product niet gevonden".into()))?;

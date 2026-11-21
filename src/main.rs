@@ -1,3 +1,4 @@
+mod bol;
 mod cogo;
 mod config;
 mod db;
@@ -14,6 +15,7 @@ pub struct AppState {
     pub config: config::Config,
     pub db: db::Db,
     pub cogo: cogo::CogoClient,
+    pub bol: bol::BolClient,
     pub scrape_lock: scraper::ScrapeLock,
 }
 
@@ -44,12 +46,14 @@ async fn main() -> Result<()> {
     let config = config::Config::from_env()?;
     let db = db::connect(&config.database_url).await?;
     let cogo = cogo::CogoClient::new(&config)?;
+    let bol = bol::BolClient::new(&config)?;
     let t = cogo.transport_status();
     tracing::info!(mode = t.mode, proxy = t.proxy, "verbinding met Collect&Go");
     let state = Arc::new(AppState {
         config,
         db,
         cogo,
+        bol,
         scrape_lock: Default::default(),
     });
 

@@ -44,6 +44,23 @@
   </dl>
   <p>Foutcodes: <code>400</code> als de link niet naar één Collect&amp;Go-product wijst, <code>404</code> als er op die link geen product staat, <code>502</code> als Collect&amp;Go niet antwoordt. De body is dan <code>{"error": "…", "status": 404}</code>.</p>
 
+  <h3 id="price-bol">bol.com</h3>
+  <p>Hetzelfde endpoint aanvaardt een link naar een bol.com-product op de Belgische site: <code>https://www.bol.com/be/nl/p/&lt;naam&gt;/&lt;nummer&gt;/</code>. Een link naar <code>bol.com/nl/…</code> (de Nederlandse site, met andere prijzen) geeft <code>400</code>. bol.com-prijzen worden niet opgevolgd: Prijsspoor haalt de productpagina op wanneer erom gevraagd wordt en bewaart het antwoord een uur. Er is dus geen geschiedenis en geen hoeveelheidskorting.</p>
+<pre><code>{
+  "source": "bol.com",
+  "product": {
+    "id": "9200000130662509",
+    "name": "Brabantia Profile Roerlepel - Beukenhout",
+    "brand": "Brabantia",
+    "ean": "8710755260582",
+    "url": "https://www.bol.com/be/nl/p/-/9200000130662509/",
+    "is_available": true,
+    "seller": "bol"
+  },
+  "price": { "currency": "EUR", "price": 10.88, "offer": null },
+  "last_updated_at": "2026-11-21T11:06:22Z"
+}</code></pre>
+
   <h2 id="products">Producten zoeken</h2>
   <pre><code>GET {{ base }}/api/v1/products?q=koffie&amp;page=1&amp;per_page=24&amp;sort=prijs&amp;available=true</code></pre>
   <p><code>sort</code> is <code>relevantie</code> (standaard), <code>prijs</code>, <code>prijs_desc</code>, <code>naam</code> of <code>gewijzigd</code>. <code>per_page</code> is maximaal 100.</p>

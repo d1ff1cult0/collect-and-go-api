@@ -19,10 +19,14 @@
  *    browser een challenge-handtekening, en die maken we bewust niet na.
  * Geen captcha's oplossen, geen vingerafdruk of challenge vervalsen.
  *
+ * bol.com: enkel stap 1, met de headers die een gewone browser meestuurt (zonder antwoordt
+ * bol.com 403). Prijsspoor vraagt daar losse productpagina's op wanneer een spreadsheet ze
+ * controleert, één tegelijk; de browserweg van stap 2 is enkel voor Collect&Go.
+ *
  * Wat dit bewust NIET is: een open proxy. De relay
  * - vraagt een gedeeld geheim (RELAY_SECRET, minstens 16 tekens);
  * - vraagt enkel https-adressen op van de hosts in RELAY_HOSTS (standaard collectandgo.be
- *   en zijn subdomeinen) en breekt een navigatie naar elders af;
+ *   en bol.com, met hun subdomeinen) en breekt een navigatie naar elders af;
  * - laadt geen afbeeldingen, video of lettertypes, en doet hoogstens twee opvragingen tegelijk;
  * - geeft enkel de body en de status terug, geen cookies of headers van Collect&Go.
  *
@@ -52,11 +56,24 @@ const CHROMIUM_ARGS = (process.env.RELAY_CHROMIUM_ARGS || '').split(' ').filter(
 const USER_AGENT =
   process.env.RELAY_USER_AGENT ||
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-const ALLOWED = (process.env.RELAY_HOSTS || 'collectandgo.be')
+const ALLOWED = (process.env.RELAY_HOSTS || 'collectandgo.be,bol.com')
   .split(',')
   .map((h) => h.trim().toLowerCase())
   .filter(Boolean);
 const HOME = 'https://www.collectandgo.be/';
+const isCogo = (hostname) => /(^|\.)collectandgo\.be$/i.test(hostname);
+// Wat Chrome meestuurt bij het openen van een pagina; bol.com weigert een aanvraag zonder.
+const BROWSER_HEADERS = {
+  accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'sec-ch-ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"macOS"',
+  'sec-fetch-dest': 'document',
+  'sec-fetch-mode': 'navigate',
+  'sec-fetch-site': 'none',
+  'sec-fetch-user': '?1',
+  'upgrade-insecure-requests': '1',
+};
 const MAX_PARALLEL = 2;
 const NAV_TIMEOUT = 30_000;
 const SESSION_MS = 20 * 60 * 1000;
@@ -215,7 +232,7 @@ function plainContext() {
 }
 
 async function fetchPlain(url, accept, apiKey) {
-  const headers = { accept, referer: HOME };
+  const headers = isCogo(new URL(url).hostname) ? { accept, referer: HOME } : { ...BROWSER_HEADERS };
   if (apiKey) {
     headers['x-cg-apikey'] = apiKey;
     headers.origin = 'https://www.collectandgo.be';
@@ -238,8 +255,10 @@ const BLOCKED = { status: 456, finalUrl: '', contentType: 'text/plain', body: Bu
 
 async function relayFetch(url, accept, apiKey) {
   const plain = await fetchPlain(url, accept, apiKey);
-  // De API gaat nooit langs de browser; enkel webpagina's die tegengehouden worden wel.
-  if (!isBlocked(plain) || !/^www\./i.test(new URL(url).hostname)) return plain;
+  // De API gaat nooit langs de browser; enkel webpagina's van Collect&Go die tegengehouden
+  // worden wel. De open pagina is van Collect&Go, dus voor bol.com heeft dat geen zin.
+  const { hostname } = new URL(url);
+  if (!isBlocked(plain) || !/^www\./i.test(hostname) || !isCogo(hostname)) return plain;
 
   if (Date.now() < blockedUntil) return BLOCKED;
   let s = await openSession();

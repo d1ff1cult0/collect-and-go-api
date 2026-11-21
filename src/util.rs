@@ -126,14 +126,16 @@ pub fn parse_product_url(raw: &str) -> Result<ProductPath, UrlError> {
 
 /// Herkent elke Collect&Go-link die naar één product wijst: een productpagina, of een zoek- of
 /// categoriepagina waarop een product is opengeklikt (`/nl/zoek?searchTerm=...#pdp_<id>`).
+///
+/// Een `#pdp_<id>` gaat voor op het pad: een categoriepagina ziet er net zo uit als een
+/// productpagina (`/nl/assortiment/suiker-pak#pdp_<id>`), maar het product is dat in het fragment.
 pub fn parse_cogo_link(raw: &str) -> Result<CogoLink, UrlError> {
     let url = parse_cogo_url(raw)?;
-    if let Some(path) = product_path(&url) {
-        return Ok(CogoLink::Page(path));
+    if let Some(c) = url.fragment().and_then(|f| PDP_RE.captures(f)) {
+        return Ok(CogoLink::Sku(c[1].to_string()));
     }
-    url.fragment()
-        .and_then(|f| PDP_RE.captures(f))
-        .map(|c| CogoLink::Sku(c[1].to_string()))
+    product_path(&url)
+        .map(CogoLink::Page)
         .ok_or(UrlError::NotAProduct)
 }
 
@@ -217,6 +219,19 @@ mod tests {
             parse_cogo_link("https://www.collectandgo.be/nl/assortiment/boni-walnootpitten-200g"),
             Ok(CogoLink::Page(p)) if p.key == "/nl/assortiment/boni-walnootpitten-200g"
         ));
+        // Categoriepagina met een opengeklikt product: het fragment telt, niet het pad.
+        assert_eq!(
+            parse_cogo_link(
+                "https://www.collectandgo.be/nl/assortiment/suiker-alternatief?rootCategoryId=20011#pdp_3074457345616687717"
+            ),
+            Ok(CogoLink::Sku("3074457345616687717".into()))
+        );
+        assert_eq!(
+            parse_cogo_link(
+                "https://www.collectandgo.be/colruyt/nl/assortiment/suiker-pak#pdp_3074457345616685309"
+            ),
+            Ok(CogoLink::Sku("3074457345616685309".into()))
+        );
         // Zoekpagina zonder opengeklikt product, of een fragment dat geen product is.
         assert_eq!(
             parse_cogo_link("https://www.collectandgo.be/nl/zoek?searchTerm=bier"),
