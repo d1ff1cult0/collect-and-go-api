@@ -150,14 +150,19 @@ fn is_type(v: &Value, t: &str) -> bool {
     }
 }
 
-/// Alle objecten in een JSON-LD-blok: het blok zelf, een lijst, of een `@graph`.
-fn objects(v: &Value) -> Vec<&Value> {
+/// Alle objecten in een JSON-LD-blok, met hun groep: het blok zelf, een lijst, een `@graph`,
+/// en de varianten (`hasVariant`) van een `ProductGroup`. Het tweede element is de groep
+/// waartoe een variant hoort, voor gegevens die enkel daar staan (zoals het merk).
+fn objects<'a>(v: &'a Value, group: Option<&'a Value>) -> Vec<(&'a Value, Option<&'a Value>)> {
     match v {
-        Value::Array(a) => a.iter().flat_map(objects).collect(),
+        Value::Array(a) => a.iter().flat_map(|x| objects(x, group)).collect(),
         Value::Object(o) => {
-            let mut out = vec![v];
+            let mut out = vec![(v, group)];
             if let Some(g) = o.get("@graph") {
-                out.extend(objects(g));
+                out.extend(objects(g, group));
+            }
+            if let Some(varianten) = o.get("hasVariant") {
+                out.extend(objects(varianten, Some(v)));
             }
             out
         }
@@ -165,16 +170,23 @@ fn objects(v: &Value) -> Vec<&Value> {
     }
 }
 
-/// Leest het product uit de HTML van een bol.com-productpagina.
-pub fn parse_product_page(html: &str) -> Option<BolProduct> {
+fn product_id(o: &Value) -> Option<String> {
+    text(o.get("productID")).or_else(|| text(o.get("sku")))
+}
+
+/// Leest het product met nummer `id` uit de HTML van een bol.com-productpagina.
+///
+/// Een product met varianten (maten, lengtes, kleuren) staat er als `ProductGroup` met alle
+/// varianten in `hasVariant`; dan telt de variant met dat nummer, niet de eerste.
+pub fn parse_product_page(html: &str, id: &str) -> Option<BolProduct> {
     let blocks: Vec<Value> = LD_JSON_RE
         .captures_iter(html)
         .filter_map(|c| serde_json::from_str(c[1].trim()).ok())
         .collect();
-    let product = blocks
+    let (product, group) = blocks
         .iter()
-        .flat_map(objects)
-        .find(|o| is_type(o, "Product"))?;
+        .flat_map(|b| objects(b, None))
+        .find(|(o, _)| is_type(o, "Product") && product_id(o).as_deref() == Some(id))?;
 
     // Het aanbod: één Offer, een lijst Offers (de eerste is de koopknop), of een AggregateOffer.
     let offer = match product.get("offers") {
@@ -199,12 +211,21 @@ pub fn parse_product_page(html: &str) -> Option<BolProduct> {
         None => (None, "EUR".into(), false, None),
     };
 
+    let uit_groep = |k: &str| group.and_then(|g| g.get(k));
+    let mut name = text(product.get("name")).or_else(|| text(uit_groep("name")))?;
+    // Bij varianten is de naam vaak voor alle maten dezelfde: de maat erbij.
+    if let Some(maat) = text(product.get("size"))
+        && group.is_some()
+        && !name.contains(&maat)
+    {
+        name = format!("{name} (maat {maat})");
+    }
     Some(BolProduct {
-        id: text(product.get("productID")).or_else(|| text(product.get("sku")))?,
-        name: text(product.get("name"))?,
-        brand: text(product.get("brand")),
+        id: product_id(product)?,
+        name,
+        brand: text(product.get("brand")).or_else(|| text(uit_groep("brand"))),
         ean: text(product.get("gtin13")).or_else(|| text(product.get("gtin"))),
-        image_url: image(product.get("image")),
+        image_url: image(product.get("image")).or_else(|| image(uit_groep("image"))),
         price,
         currency,
         is_available: available,
@@ -378,7 +399,7 @@ impl BolClient {
         match status {
             200..300 => {
                 let html = String::from_utf8_lossy(&body);
-                Ok(parse_product_page(&html).filter(|p| p.id == id))
+                Ok(parse_product_page(&html, id))
             }
             404 | 410 => Ok(None),
             403 | 429 | 456 => Err(BolError::Upstream(format!(
@@ -533,7 +554,7 @@ mod tests {
 
     #[test]
     fn product_page() {
-        let p = parse_product_page(PAGE).unwrap();
+        let p = parse_product_page(PAGE, "9200000130662509").unwrap();
         assert_eq!(p.id, "9200000130662509");
         assert_eq!(p.name, "Brabantia Profile Roerlepel - Beukenhout");
         assert_eq!(p.brand.as_deref(), Some("Brabantia"));
@@ -549,11 +570,39 @@ mod tests {
         let uitverkocht = PAGE
             .replace(r#""price":"10.88","#, "")
             .replace("InStock", "https://schema.org/OutOfStock");
-        let p = parse_product_page(&uitverkocht).unwrap();
+        let p = parse_product_page(&uitverkocht, "9200000130662509").unwrap();
         assert_eq!(p.price, None);
         assert!(!p.is_available);
 
-        assert_eq!(parse_product_page("<html>geen product</html>"), None);
+        assert_eq!(parse_product_page("<html>geen product</html>", "1"), None);
+        // Een ander product op de pagina telt niet.
+        assert_eq!(parse_product_page(PAGE, "9300000000000000"), None);
+    }
+
+    /// Een product met maten: `ProductGroup` met de varianten in `hasVariant`.
+    const GROEP: &str = r#"<script type="application/ld+json">{"@type":"ProductGroup","@id":"https://www.bol.com/#9300000218381383","name":"Widmann - Groen Kerst Monster Grinch","productGroupID":"9300000218381383","brand":{"@type":"Brand","name":"Widmann"},"image":{"@type":"ImageObject","url":"https://media.s-bol.com/g.jpg"},"hasVariant":[
+{"@type":"Product","name":"Kerst monster kostuum Grinch","productID":"9300000239435196","size":"XXL","offers":{"@type":"Offer","price":"49.95","priceCurrency":"EUR","availability":"InStock","seller":{"@type":"Organization","name":"Feestwinkel.be"}}},
+{"@type":"Product","name":"Kerst monster kostuum Grinch","productID":"9300000239435197","size":"M","gtin13":"8003558468126","offers":{"@type":"Offer","price":"45.95","priceCurrency":"EUR","availability":"InStock","seller":{"@type":"Organization","name":"Feestwinkel.be"}}}
+]}</script>"#;
+
+    #[test]
+    fn product_group_variant() {
+        let m = parse_product_page(GROEP, "9300000239435197").unwrap();
+        assert_eq!(m.name, "Kerst monster kostuum Grinch (maat M)");
+        assert_eq!(m.price, Some(45.95));
+        assert_eq!(m.ean.as_deref(), Some("8003558468126"));
+        assert_eq!(m.brand.as_deref(), Some("Widmann"), "merk uit de groep");
+        assert_eq!(
+            m.image_url.as_deref(),
+            Some("https://media.s-bol.com/g.jpg")
+        );
+        assert_eq!(m.seller.as_deref(), Some("Feestwinkel.be"));
+
+        let xxl = parse_product_page(GROEP, "9300000239435196").unwrap();
+        assert_eq!(xxl.price, Some(49.95));
+
+        // Het nummer van de groep zelf is geen product.
+        assert_eq!(parse_product_page(GROEP, "9300000218381383"), None);
     }
 
     /// bol.com weigert de server (403), de relay krijgt de pagina wel.
